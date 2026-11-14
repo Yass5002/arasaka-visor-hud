@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api-proxy": {
-        target: "https://api.nasa.yssn.tech",
+        target: "https://nasa-api.yssn.tech",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-proxy/, ""),
       },

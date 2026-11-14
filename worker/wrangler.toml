@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2025-03-01"
 
 routes = [
-  { pattern = "api.nasa.yssn.tech", custom_domain = true }
+  { pattern = "nasa-api.yssn.tech", custom_domain = true }
 ]
 
 [vars]

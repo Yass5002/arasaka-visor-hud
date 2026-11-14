@@ -21,7 +21,7 @@ export interface ChatToolSpec {
 export const DEFAULT_PROXY_BASE_URL =
   import.meta.env.VITE_PROXY_URL ||
   (typeof window !== "undefined" && window.location.hostname === "nasa.yssn.tech"
-    ? "https://api.nasa.yssn.tech"
+    ? "https://nasa-api.yssn.tech"
     : "/api-proxy");
 
 export class AzureProxyClient {
