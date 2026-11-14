@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/MarsBackdrop.tsx","./src/components/VisorFrame.tsx","./src/components/VisorHud.tsx","./src/components/VisorOptics.tsx","./src/config/visorConfig.ts"],"version":"5.7.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/VisorScene.tsx","./src/config/visorConfig.ts","./src/hud/HudCanvasRenderer.ts","./src/three/HelmetDofComposite.ts","./src/three/buildHelmetGroup.ts","./src/three/buildVisorGlass.ts","./src/three/proceduralTextures.ts"],"version":"5.7.3"}

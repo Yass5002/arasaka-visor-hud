@@ -1,102 +1,96 @@
 /**
- * Central configuration for the first-person Mars EVA Helmet & Visor HUD.
- * Every color, dimension, position, animation speed, telemetry range, and
- * parallax/damping constant lives here so nothing is hardcoded in components.
+ * Central configuration for the unified 3D first-person Mars EVA Helmet & Visor Scene.
+ * Every dimension, color, coordinate, shader optic, PBR texture setting, animation timing,
+ * and head/eye motion parameter lives here so nothing is hardcoded in scene or HUD modules.
  */
 
-export interface VisorMotionConfig {
-  /** Perspective camera vertical FOV (degrees) */
-  fovDeg: number;
-  /** Overscan factor preventing any panorama border exposure at hard limits */
-  panoramaCoverScale: number;
-  /** Source panorama aspect ratio (2400 / 1225) */
-  panoramaAspect: number;
-  /** Maximum horizontal camera translation (world units) */
-  maxCameraShiftX: number;
-  /** Maximum vertical camera translation (world units) */
-  maxCameraShiftY: number;
-  /** Maximum camera yaw (radians) */
-  maxCameraYawRad: number;
-  /** Maximum camera pitch (radians) */
-  maxCameraPitchRad: number;
-  /** Exponential damping for primary mouse look target */
-  pointerDamping: number;
-  /** Exponential damping for world camera layer (fastest response) */
-  sceneDamping: number;
-  /** Exponential damping for main holographic HUD layer (trails scene slightly) */
-  hudTrailDamping: number;
-  /** Exponential damping for floating center reticle (trails slightly behind HUD) */
-  reticleTrailDamping: number;
-  /** Exponential damping for near-eye interior helmet frame & booms */
-  helmetDamping: number;
-  /** Milliseconds of mouse stillness before view begins drifting back to center */
-  idleReturnDelayMs: number;
-  /** Exponential return-to-center decay speed (1/sec) once mouse is idle */
-  idleReturnRate: number;
-  /** Continuous multi-harmonic breathing sway amplitudes (never reaches zero) */
-  breathing: {
-    primaryFreqRad: number;
-    primaryAmpY: number;
-    secondaryFreqRad: number;
-    secondaryAmpY: number;
-    lateralFreqRad: number;
-    lateralAmpX: number;
-    microDriftFreqRad: number;
-    microDriftAmpX: number;
-  };
-  /** Per-layer screen-space pixel translation multipliers at [-1, 1] look extremes */
-  parallaxOffsets: {
-    hudX: number;
-    hudY: number;
-    hudRotateDeg: number;
-    reticleX: number;
-    reticleY: number;
-    helmetX: number;
-    helmetY: number;
-    helmetRotateDeg: number;
-    domeReflectionsX: number;
-    domeReflectionsY: number;
-  };
-}
-
-export const MOTION_CONFIG: VisorMotionConfig = {
+export const SCENE_CONFIG = {
   fovDeg: 46,
-  panoramaCoverScale: 1.18,
+  nearPlane: 0.03,
+  farPlane: 260,
+  maxPixelRatio: 2,
+  voidBg: "#030405",
+  /**
+   * Mars sun direction verified from Perseverance panorama (public/mars/mars-terrain-solid.webp):
+   * upper-left sky glow casts rock shadows toward +X / +Z (lower-right).
+   */
+  marsSun: {
+    direction: [-0.76, 0.54, -0.36] as readonly [number, number, number],
+    color: "#ffd9b3",
+    intensity: 2.35,
+  },
+  /** Warm rusty regolith bounce light illuminating the underside of chin/booms/cheeks */
+  marsGroundBounce: {
+    direction: [0.15, -0.92, -0.36] as readonly [number, number, number],
+    color: "#b86b43",
+    intensity: 0.72,
+  },
+  /** Soft dusty Martian sky fill vs dark interior floor */
+  hemisphereLight: {
+    skyColor: "#c89e74",
+    groundColor: "#1b1412",
+    intensity: 0.68,
+  },
+  /** Faint cool visor back-scatter fill inside cavity so dark carbon parts retain readable form */
+  cavityFill: {
+    direction: [0.45, 0.18, 0.87] as readonly [number, number, number],
+    color: "#7e92b5",
+    intensity: 0.34,
+  },
+} as const;
+
+export const MOTION_CONFIG = {
+  /** Base overscan ensuring panorama borders never appear across viewports & look limits */
+  panoramaCoverScale: 1.25,
   panoramaAspect: 2400 / 1225,
-  maxCameraShiftX: 0.42,
-  maxCameraShiftY: 0.22,
-  maxCameraYawRad: 0.024,
-  maxCameraPitchRad: 0.016,
-  pointerDamping: 4.4,
-  sceneDamping: 3.2,
-  hudTrailDamping: 2.05,
-  reticleTrailDamping: 1.55,
-  helmetDamping: 2.45,
-  idleReturnDelayMs: 1350,
-  idleReturnRate: 0.9,
-  breathing: {
-    primaryFreqRad: 1.18,
-    primaryAmpY: 0.034,
-    secondaryFreqRad: 0.51,
-    secondaryAmpY: 0.015,
-    lateralFreqRad: 0.67,
-    lateralAmpX: 0.022,
-    microDriftFreqRad: 0.31,
-    microDriftAmpX: 0.011,
+  /** Angular margin kept between screen ray extremes and panorama image edge (radians) */
+  edgeSafetyMarginRad: 0.012,
+  /** Primary mouse target exponential damping */
+  pointerDamping: 4.0,
+  /** Milliseconds of mouse stillness before gaze drifts smoothly back to center */
+  idleReturnDelayMs: 1450,
+  /** Exponential return-to-center decay speed (1/sec) once idle */
+  idleReturnRate: 0.72,
+  /** Heavy rigid-body head movement (turns helmet + curved glass + HUD together) */
+  head: {
+    damping: 1.65,
+    maxYawRad: 0.042,
+    maxPitchRad: 0.028,
+    rollPerYawRatio: -0.18,
+    breathing: {
+      pitchFreqRad: 1.08,
+      pitchAmpRad: 0.0042,
+      pitchHarmonicFreqRad: 0.47,
+      pitchHarmonicAmpRad: 0.0018,
+      yawFreqRad: 0.59,
+      yawAmpRad: 0.0026,
+      rollFreqRad: 0.53,
+      rollAmpRad: 0.0024,
+    },
   },
-  parallaxOffsets: {
-    hudX: 20,
-    hudY: 14,
-    hudRotateDeg: 0.55,
-    reticleX: 34,
-    reticleY: 22,
-    helmetX: -12,
-    helmetY: -8,
-    helmetRotateDeg: -0.45,
-    domeReflectionsX: 16,
-    domeReflectionsY: 9,
+  /** Independent eye movement inside the helmet cavity (creates true 3D perspective shift) */
+  eye: {
+    damping: 3.1,
+    maxYawRad: 0.032,
+    maxPitchRad: 0.026,
+    maxShiftX: 0.021,
+    maxShiftY: 0.017,
+    maxShiftZ: 0.005,
+    /** Shifting camera slightly down when looking down brings close chin/booms naturally into view */
+    shiftYPerLookY: -0.015,
+    shiftZPerLookY: 0.004,
+    breathing: {
+      yawFreqRad: 0.71,
+      yawAmpRad: 0.0016,
+      pitchFreqRad: 1.24,
+      pitchAmpRad: 0.0018,
+      shiftXFreqRad: 0.43,
+      shiftXAmp: 0.0018,
+      shiftYFreqRad: 0.89,
+      shiftYAmp: 0.0022,
+    },
   },
-};
+} as const;
 
 export const PANORAMA_CONFIG = {
   nearDist: 22.0,
@@ -113,132 +107,200 @@ export const PANORAMA_CONFIG = {
   shadowBottomRange: 0.42,
 } as const;
 
-export const PALETTE_CONFIG = {
-  voidBg: "#030405",
-  hudCyan: "#96c2ff",
-  hudCyanBright: "#cfe4ff",
-  hudCyanGlow: "rgba(142, 188, 255, 0.55)",
-  hudIndigo: "#6154ff",
-  hudIndigoLight: "#8a7dff",
-  hudIndigoTrack: "rgba(96, 84, 255, 0.24)",
-  hudTextWhite: "#f4f7ff",
-  hudTextDim: "rgba(218, 232, 255, 0.78)",
-  hudAlertRed: "#ff4626",
-  hudAlertGlow: "rgba(255, 70, 38, 0.68)",
-  scanMeshCyan: "rgba(145, 206, 255, 0.62)",
-  scanMeshCyanRgb: "155, 212, 255",
-  scanMeshNodes: "rgba(210, 238, 255, 0.85)",
-  scanMeshNodesRgb: "218, 242, 255",
-  cornerStreamFill: "rgba(128, 172, 245, 0.08)",
-  helmetShellOuter: "#0b0b0e",
-  helmetShellMid: "#1e1e24",
-  helmetCheekLight: "#6f6e74",
-  helmetCheekMid: "#47464b",
-  helmetCheekShadow: "#252429",
-  helmetChinCenter: "#3b3a3f",
-  helmetChinRight: "#5a585f",
-  helmetBoomDark: "#090a0c",
-  helmetBoomBody: "#16171b",
-  helmetBoomHighlight: "#2f3137",
+export const HELMET_GEO_CONFIG = {
+  /** Superellipse outer helmet aperture opening (meters) at visor glass seal depth */
+  aperture: {
+    sealZ: -0.285,
+    innerRimZ: -0.225,
+    browCheekZ: -0.135,
+    backWallZ: 0.08,
+    halfWidth: 0.228,
+    halfHeight: 0.124,
+    superellipsePower: 2.85,
+    radialSteps: 84,
+    ringFlareOutward: 0.065,
+    gasketTubeRadius: 0.011,
+  },
+  /** Sloped matte ballistic-grey inner cheek cowls */
+  cheeks: {
+    offsetX: 0.156,
+    offsetY: -0.088,
+    offsetZ: -0.195,
+    width: 0.168,
+    height: 0.058,
+    depth: 0.036,
+    bevelSize: 0.007,
+    tiltZDeg: 26,
+    yawInDeg: 24,
+    pitchUpDeg: -14,
+  },
+  /** Lower chin cowling bar & inner rubber gasket lip */
+  chin: {
+    centerY: -0.088,
+    centerZ: -0.192,
+    arcRadiusX: 0.215,
+    arcRadiusZ: 0.092,
+    arcSpanDeg: 102,
+    barThicknessY: 0.034,
+    barDepthZ: 0.044,
+    lipTubeRadius: 0.0075,
+    bridgeWidth: 0.088,
+    bridgeHeight: 0.022,
+  },
+  /** Left & right lower sensor / acoustic microphone booms protruding close to the eye */
+  booms: {
+    baseX: 0.118,
+    baseY: -0.092,
+    baseZ: -0.208,
+    tipX: 0.034,
+    tipY: -0.056,
+    tipZ: -0.172,
+    armWidth: 0.011,
+    armThickness: 0.0075,
+    ribWidth: 0.0042,
+    capsuleRadius: 0.0098,
+    capsuleDepth: 0.0068,
+    capsuleTiltXDeg: -20,
+    capsuleTiltYDeg: 24,
+  },
+  /** Interior padding bolsters, braided conduit cables, and machined hex bolts */
+  details: {
+    paddingCornerX: 0.186,
+    paddingCornerY: 0.094,
+    paddingCornerZ: -0.215,
+    cableRadius: 0.0046,
+    boltRadius: 0.0038,
+  },
+  /** Procedural PBR surface textures & material appearance */
+  pbr: {
+    texSize: 512,
+    shellColor: "#1a1b20",
+    shellRoughness: 0.64,
+    shellMetalness: 0.12,
+    shellBumpScale: 0.0024,
+    gasketColor: "#101114",
+    gasketRoughness: 0.86,
+    gasketBumpScale: 0.0018,
+    cheekColor: "#636268",
+    cheekRoughness: 0.56,
+    cheekMetalness: 0.16,
+    cheekBumpScale: 0.0016,
+    chinColor: "#3d3c42",
+    chinRoughness: 0.58,
+    chinMetalness: 0.14,
+    paddingColor: "#24252b",
+    paddingRoughness: 0.88,
+    paddingBumpScale: 0.0032,
+    boomColor: "#17181c",
+    boomRoughness: 0.42,
+    boomMetalness: 0.52,
+    boomRimColor: "#484a52",
+    grilleColor: "#121318",
+    metalFastenerColor: "#757880",
+    metalFastenerRoughness: 0.34,
+    metalFastenerMetalness: 0.82,
+    cableColor: "#1b1c22",
+    cableRoughness: 0.68,
+  },
+  /** Optical Depth-of-Field settings for near-eye foreground helmet parts (Mars untouched) */
+  dof: {
+    /** World distance (meters) from eye where helmet blur fades completely to crisp */
+    nearFullFocusDist: 0.33,
+    /** Distance (meters) from eye where foreground bokeh reaches maxBlurPx */
+    nearMaxBlurDist: 0.145,
+    /** Maximum foreground bokeh blur radius (pixels at 1080p reference height) */
+    maxBlurPx: 7.5,
+    /** Bokeh circular tap count in composite shader */
+    sampleCount: 16,
+    /** Alpha boost smoothness on silhouette edges */
+    alphaFeatherGamma: 0.92,
+  },
 } as const;
 
-export const OPTICS_CONFIG = {
-  vignette: {
-    cx: "50%",
-    cy: "50%",
-    r: "68%",
-    clearStop: "82%",
-    midStop: "94%",
-    midOpacity: 0.1,
-    edgeOpacity: 0.24,
-    color: "#040405",
+export const VISOR_GLASS_CONFIG = {
+  /** Ellipsoidal curved visor dome positioned rigidly in headGroup */
+  dome: {
+    centerX: 0,
+    centerY: 0,
+    centerZ: 0.02,
+    radiusX: 0.365,
+    radiusY: 0.295,
+    radiusZ: 0.345,
+    /** Total curved dome arc (wider than viewport so glass never shows floating cut borders) */
+    arcYawDeg: 92,
+    arcPitchDeg: 62,
+    segmentsW: 64,
+    segmentsH: 44,
   },
-  domeReflections: {
-    leftX: 268,
-    leftY: 226,
-    leftRx: 26,
-    leftRy: 78,
-    rightX: 1652,
-    rightY: 226,
-    rightRx: 26,
-    rightRy: 78,
-    opacity: 0.16,
-    blurStdDev: 7,
+  /** Active angular UV window on the dome where projected HUD frame & widgets map */
+  hudWindowUv: {
+    uMin: 0.155,
+    uMax: 0.845,
+    vMin: 0.175,
+    vMax: 0.845,
   },
-} as const;
-
-export const HELMET_CONFIG = {
-  viewBoxW: 1920,
-  viewBoxH: 1080,
-  /** Near-eye blur depths (px) matching out-of-focus foreground interior */
-  shellBlurPx: 3.2,
-  cheekBlurPx: 1.8,
-  boomBlurPx: 2.8,
-  boomTipBlurPx: 2.1,
-  contactShadowWidth: 18,
-  contactShadowOpacity: 0.34,
-  contactShadowBlur: 14,
-  /** Inner first-person helmet silhouette — open wide across sky/horizon/sides */
-  aperturePath: `
-    M 140,86
-    C 420,12 1500,12 1780,86
-    C 1882,120 1916,245 1916,520
-    C 1916,748 1876,884 1766,954
-    C 1620,1034 1280,1046 960,1046
-    C 640,1046 300,1034 154,954
-    C 44,884 4,748 4,520
-    C 4,245 38,120 140,86 Z
-  `,
-  /** Left & right sloped cheek interior shells */
-  leftCheekPath: "M 0,742 L 266,978 L 284,1080 L 0,1080 Z",
-  rightCheekPath: "M 1920,742 L 1654,978 L 1636,1080 L 1920,1080 Z",
-  /** Curved lower chin-lip cowling */
-  lowerChinPath: "M 240,1080 C 490,1012 1430,1012 1680,1080 Z",
-  lowerChinLipPath: "M 490,1044 C 780,1022 1140,1022 1430,1044 L 1445,1080 L 475,1080 Z",
-  /** Left & right lower chin interior microphone / sensor booms */
-  leftBoom: {
-    armPath: "M 148,1080 L 664,894 L 732,934 L 316,1080 Z",
-    ribPath: "M 228,1076 L 672,912 L 690,924 L 268,1080 Z",
-    tipCx: 696,
-    tipCy: 916,
-    tipRx: 36,
-    tipRy: 26,
-    tipRotateDeg: -20,
+  /** Intentionally slightly lower offscreen HUD texture resolution so projected light is never crisp */
+  hudTexture: {
+    width: 1152,
+    height: 648,
+    updateFps: 30,
   },
-  rightBoom: {
-    armPath: "M 1772,1080 L 1256,894 L 1188,934 L 1604,1080 Z",
-    ribPath: "M 1692,1076 L 1248,912 L 1230,924 L 1652,1080 Z",
-    tipCx: 1224,
-    tipCy: 916,
-    tipRx: 36,
-    tipRy: 26,
-    tipRotateDeg: 20,
+  /** Projected optical light & glass thickness properties (strictly additive over Mars) */
+  optics: {
+    /** Overall see-through projected light intensity */
+    hudIntensity: 0.92,
+    /** Optical focus softness radius (in HUD UV texel units) */
+    softBlurRadiusTexels: 1.55,
+    /** Optical bloom halo strength & wide spread */
+    bloomStrength: 0.44,
+    bloomSpreadTexels: 5.8,
+    /** Faint ghost double image from outer/inner thick curved visor reflections */
+    ghostOffsetUv: [0.0058, -0.0046] as readonly [number, number],
+    ghostViewParallax: 0.012,
+    ghostOpacity: 0.24,
+    /** Subtle RGB chromatic aberration increasing radially toward curved glass edges */
+    chromaticEdgeStrength: 0.0044,
+    chromaticPower: 1.65,
+    /** Very faint additive curved dome specular sheen from Martian sun & grazing Fresnel */
+    domeSpecularOpacity: 0.065,
+    domeSpecularColor: "#ffe4c8",
+    domeFresnelOpacity: 0.032,
+    domeFresnelPower: 3.4,
+    domeFresnelColor: "#9dc5ff",
   },
 } as const;
 
 export const HUD_CONFIG = {
-  viewBoxW: 1920,
-  viewBoxH: 1080,
-  /** Boot timing (seconds) matching the 11.5s sequence, then looping telemetry */
+  canvasW: 1152,
+  canvasH: 648,
+  palette: {
+    hudCyan: "#96c2ff",
+    hudCyanBright: "#cfe4ff",
+    hudCyanGlow: "rgba(142, 188, 255, 0.72)",
+    hudIndigo: "#6154ff",
+    hudIndigoLight: "#8a7dff",
+    hudIndigoTrack: "rgba(96, 84, 255, 0.28)",
+    hudTextWhite: "#f2f6ff",
+    hudTextDim: "rgba(218, 232, 255, 0.80)",
+    hudAlertRed: "#ff4828",
+    hudAlertGlow: "rgba(255, 72, 40, 0.82)",
+    scanMeshCyanRgb: "155, 212, 255",
+    scanMeshNodesRgb: "222, 244, 255",
+    cornerStreamFill: "rgba(128, 172, 245, 0.09)",
+  },
   timings: {
-    frameBootSec: 0.65,
+    frameBootSec: 0.75,
     scanSweepStartSec: 0.15,
-    scanSweepDurationSec: 1.55,
-    scanPeriodicIntervalSec: 14.0,
-    topBoxesFadeStartSec: 0.55,
+    scanSweepDurationSec: 1.65,
+    scanPeriodicIntervalSec: 13.5,
     radAlertDelaySec: 1.65,
-    radPulseFreqHz: 1.25,
-    barsRiseDurationSec: 1.35,
-    vitalsRampDurationSec: 1.65,
-    reticleSpinOuterDegPerSec: 16,
-    reticleSpinInnerDegPerSec: -24,
-    reticleSpinDashDegPerSec: 9,
-    reticlePulseIntervalSec: 4.8,
+    radPulseFreqHz: 1.22,
+    barsRiseDurationSec: 1.45,
+    vitalsRampDurationSec: 1.75,
     telemetryTickMs: 110,
     hexCycleMs: 620,
-    codeScrollSpeedPxPerSec: 28,
+    codeScrollSpeedPxPerSec: 18,
   },
-  /** Hexadecimal addresses cycled in the upper-left header tab */
   hexAddresses: [
     "0x0D55291C",
     "0x2DF960DD",
@@ -255,49 +317,149 @@ export const HUD_CONFIG = {
     "0x3400186D",
     "0x028B3D28",
   ],
-  /** Outer chamfered holographic perimeter bracket contours */
+  /** Normalized [0..1] polyline paths inside the HUD canvas for chamfered double-line perimeter brackets */
   perimeterPaths: [
-    { d: "M 28,272 L 268,62 L 456,62 L 486,38 L 788,38 L 814,62 L 856,62", strokeWidth: 2.4, strokeOpacity: 1 },
-    { d: "M 42,292 L 274,80 L 452,80 L 482,56 L 784,56", strokeWidth: 1.2, strokeOpacity: 0.6 },
-    { d: "M 1064,62 L 1106,62 L 1132,38 L 1434,38 L 1464,62 L 1652,62 L 1892,272", strokeWidth: 2.4, strokeOpacity: 1 },
-    { d: "M 1136,56 L 1438,56 L 1468,80 L 1646,80 L 1878,292", strokeWidth: 1.2, strokeOpacity: 0.6 },
-    { d: "M 28,272 L 28,314 L 84,352 L 84,598 L 40,636 L 40,736 L 234,826 L 278,808", strokeWidth: 2.2, strokeOpacity: 1 },
-    { d: "M 26,650 L 216,742 L 284,798", strokeWidth: 1.3, strokeOpacity: 0.55 },
-    { d: "M 280,956 L 234,992 L 142,1022 L 44,986 L 26,888", strokeWidth: 1.9, strokeOpacity: 0.72 },
-    { d: "M 1892,272 L 1892,314 L 1836,352 L 1836,598 L 1880,636 L 1880,736 L 1686,826 L 1642,808", strokeWidth: 2.2, strokeOpacity: 1 },
-    { d: "M 1894,650 L 1704,742 L 1636,798", strokeWidth: 1.3, strokeOpacity: 0.55 },
-    { d: "M 1640,956 L 1686,992 L 1778,1022 L 1876,986 L 1894,888", strokeWidth: 1.9, strokeOpacity: 0.72 },
+    {
+      points: [
+        [0.015, 0.252],
+        [0.140, 0.057],
+        [0.238, 0.057],
+        [0.253, 0.035],
+        [0.410, 0.035],
+        [0.424, 0.057],
+        [0.446, 0.057],
+      ],
+      lineWidth: 1.8,
+      alpha: 0.92,
+    },
+    {
+      points: [
+        [0.022, 0.270],
+        [0.143, 0.074],
+        [0.235, 0.074],
+        [0.251, 0.052],
+        [0.408, 0.052],
+      ],
+      lineWidth: 0.95,
+      alpha: 0.56,
+    },
+    {
+      points: [
+        [0.554, 0.057],
+        [0.576, 0.057],
+        [0.590, 0.035],
+        [0.747, 0.035],
+        [0.762, 0.057],
+        [0.860, 0.057],
+        [0.985, 0.252],
+      ],
+      lineWidth: 1.8,
+      alpha: 0.92,
+    },
+    {
+      points: [
+        [0.592, 0.052],
+        [0.749, 0.052],
+        [0.765, 0.074],
+        [0.857, 0.074],
+        [0.978, 0.270],
+      ],
+      lineWidth: 0.95,
+      alpha: 0.56,
+    },
+    {
+      points: [
+        [0.015, 0.252],
+        [0.015, 0.291],
+        [0.044, 0.326],
+        [0.044, 0.554],
+        [0.021, 0.589],
+        [0.021, 0.681],
+        [0.122, 0.765],
+        [0.145, 0.748],
+      ],
+      lineWidth: 1.65,
+      alpha: 0.9,
+    },
+    {
+      points: [
+        [0.014, 0.602],
+        [0.112, 0.687],
+        [0.148, 0.739],
+      ],
+      lineWidth: 1.0,
+      alpha: 0.54,
+    },
+    {
+      points: [
+        [0.146, 0.885],
+        [0.122, 0.918],
+        [0.074, 0.946],
+        [0.023, 0.913],
+        [0.014, 0.822],
+      ],
+      lineWidth: 1.4,
+      alpha: 0.7,
+    },
+    {
+      points: [
+        [0.985, 0.252],
+        [0.985, 0.291],
+        [0.956, 0.326],
+        [0.956, 0.554],
+        [0.979, 0.589],
+        [0.979, 0.681],
+        [0.878, 0.765],
+        [0.855, 0.748],
+      ],
+      lineWidth: 1.65,
+      alpha: 0.9,
+    },
+    {
+      points: [
+        [0.986, 0.602],
+        [0.888, 0.687],
+        [0.852, 0.739],
+      ],
+      lineWidth: 1.0,
+      alpha: 0.54,
+    },
+    {
+      points: [
+        [0.854, 0.885],
+        [0.878, 0.918],
+        [0.926, 0.946],
+        [0.977, 0.913],
+        [0.986, 0.822],
+      ],
+      lineWidth: 1.4,
+      alpha: 0.7,
+    },
   ],
   topLeftBox: {
-    x: 526,
-    y: 44,
-    w: 256,
-    h: 126,
-    fontSize: 14,
+    x: 0.274,
+    y: 0.041,
+    w: 0.133,
+    h: 0.117,
+    fontSizeRatio: 0.0155,
   },
   topRightAlert: {
-    x: 1146,
-    y: 44,
-    w: 256,
-    h: 126,
+    x: 0.597,
+    y: 0.041,
+    w: 0.133,
+    h: 0.117,
     line1: "HIGH RAD",
     line2: "DETECTED",
-    fontSize: 31,
+    fontSizeRatio: 0.031,
   },
   leftBars: {
-    originX: 84,
-    originY: 344,
-    skewDeg: -3.2,
-    axisX: 44,
-    barStartX: 48,
-    labelX: 34,
-    labelFontSize: 13.5,
-    barHeight: 19,
-    barGap: 41,
-    maxBarWidth: 368,
-    yearBaseX: 64,
-    yearStepX: 82,
-    yearFontSize: 11.5,
+    originX: 0.052,
+    originY: 0.322,
+    barHeight: 0.018,
+    barGap: 0.038,
+    maxBarWidth: 0.186,
+    labelFontRatio: 0.0135,
+    yearFontRatio: 0.0115,
     axisYears: ["2016", "2017", "2018", "2019", "2020"],
     rows: [
       { basePct: 72.4, ampPct: 14.5, freq: 0.42, phase: 0.0 },
@@ -308,21 +470,19 @@ export const HUD_CONFIG = {
     ],
   },
   unitBlock: {
-    x: 294,
-    y: 740,
-    skewDeg: -4,
-    hashCount: 18,
-    hashSpacing: 13,
-    unitFontSize: 19,
-    coordFontSize: 11.5,
-    footerFontSize: 10,
+    x: 0.156,
+    y: 0.688,
+    hashCount: 16,
+    hashSpacing: 0.0072,
+    unitFontRatio: 0.0185,
+    coordFontRatio: 0.0115,
+    footerFontRatio: 0.010,
     units: ["UNIT 01", "UNIT 02", "UNIT 03"],
     unitOscillators: [
-      { baseA: 320, baseB: 440, baseC: 510, ampA: 42, ampB: 31, ampC: 27, freqA: 1.2, freqB: 0.9, freqC: 1.5, init: "531.18/443.41/535.43" },
-      { baseA: 435, baseB: 528, baseC: 575, ampA: 42, ampB: 31, ampC: 27, freqA: 1.6, freqB: 1.2, freqC: 1.75, init: "264.11/558.42/678.52" },
-      { baseA: 550, baseB: 616, baseC: 640, ampA: 42, ampB: 31, ampC: 27, freqA: 2.0, freqB: 1.5, freqC: 2.0, init: "183.43/624.83/546.87" },
+      { baseA: 320, baseB: 440, baseC: 510, ampA: 42, ampB: 31, ampC: 27, freqA: 1.2, freqB: 0.9, freqC: 1.5 },
+      { baseA: 435, baseB: 528, baseC: 575, ampA: 42, ampB: 31, ampC: 27, freqA: 1.6, freqB: 1.2, freqC: 1.75 },
+      { baseA: 550, baseB: 616, baseC: 640, ampA: 42, ampB: 31, ampC: 27, freqA: 2.0, freqB: 1.5, freqC: 2.0 },
     ],
-    footerSeed: ["32359904.442", "2595602.5", "394.2", "9582.249", "0.1", "384.05"],
     footerOscillators: [
       { base: 32359904.4, amp: 14.2, freq: 0.7, mode: "sin", decimals: 3 },
       { base: 2595602.5, amp: 8.4, freq: 1.1, mode: "cos", decimals: 1 },
@@ -331,68 +491,47 @@ export const HUD_CONFIG = {
       { base: 0.1, amp: 0.4, freq: 0.6, mode: "abssin", decimals: 1 },
       { base: 384.05, amp: 4.2, freq: 1.3, mode: "sin", decimals: 2 },
     ],
-    tetherAnchorOffsetX: 140,
-    tetherAnchorOffsetY: 16,
   },
   vitals: {
-    x: 726,
-    y: 774,
-    barWidth: 392,
-    barHeight: 25,
-    rowGap: 46,
-    o2LabelFontSize: 24,
-    atmLabelFontSize: 22,
-    valueFontSize: 20,
-    o2ValueX: 84,
-    atmValueX: 128,
-    tetherAnchorOffsetX: 190,
-    tetherAnchorOffsetY: 0,
+    x: 0.392,
+    y: 0.728,
+    barWidth: 0.215,
+    barHeight: 0.023,
+    rowGap: 0.043,
+    labelFontRatio: 0.022,
+    valueFontRatio: 0.019,
     o2: { label: "O", sub: "2", base: 0.129, amp: 0.006, freq: 0.62, max: 0.22, unit: "%" },
     atm: { label: "ATM", base: 7.4, amp: 0.65, freq: 0.44, max: 12.0, unit: "mb" },
   },
   altitudeTape: {
-    x: 1712,
-    topY: 198,
-    bottomY: 822,
-    skewDeg: 3.2,
+    x: 0.892,
+    topY: 0.185,
+    bottomY: 0.762,
     tickCount: 38,
     valueStepPerTick: 0.12,
-    tickLabelFontSize: 11,
-    pitchSensitivityPx: 54,
-    idleWaveAmpPx: 5,
+    tickLabelFontRatio: 0.0105,
+    pitchSensitivityPxRatio: 0.095,
+    idleWaveAmpPxRatio: 0.0045,
     idleWaveFreqRad: 0.8,
     baseValue: 14.2,
   },
-  reticle: {
-    baseCx: 912,
-    baseCy: 556,
-    outerRadius: 94,
-    innerRadius: 56,
-    dashHaloOffset: 24,
-    dotRadius: 4,
-    crosshairGap: 7,
-    crosshairLen: 18,
-    pulseThreshold: 0.28,
-  },
   cornerStreams: {
-    left: { x: 46, y: 804, w: 214, h: 204, skewDeg: 14, rotateYDeg: 22 },
-    right: { x: 1656, y: 804, w: 214, h: 204, skewDeg: -14, rotateYDeg: -22 },
-    lineCount: 36,
-    cycleHeightPx: 180,
-    lineStepY: 5,
-    lineHeightPx: 2.2,
+    left: { x: 0.024, y: 0.746, w: 0.112, h: 0.190 },
+    right: { x: 0.864, y: 0.746, w: 0.112, h: 0.190 },
+    lineCount: 34,
+    cycleHeightRatio: 0.168,
+    lineStepRatio: 0.0048,
+    lineHeightRatio: 0.0022,
   },
   scanSweep: {
-    canvasWidth: 960,
-    canvasHeight: 540,
-    cols: 7,
-    rows: 13,
+    cols: 8,
+    rows: 14,
     bandWidthRatio: 0.22,
     tiltFactor: 0.08,
-    lineWidth: 1.15,
-    bowAmplitudePx: 34,
-    verticalCurvePx: 18,
-    maxAlphaBoot: 0.95,
-    maxAlphaPeriodic: 0.55,
+    lineWidth: 1.05,
+    bowAmplitudeRatio: 0.028,
+    verticalCurveRatio: 0.016,
+    maxAlphaBoot: 0.92,
+    maxAlphaPeriodic: 0.52,
   },
 } as const;
