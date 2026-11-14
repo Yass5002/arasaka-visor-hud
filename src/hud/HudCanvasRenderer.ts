@@ -7,6 +7,13 @@ interface StreamLineSpec {
   bright: boolean;
 }
 
+export interface HudSimInputs {
+  o2OverridePct?: number;
+  atmOverrideMb?: number;
+  forceRadAlert?: boolean;
+  manualScanStartSec?: number;
+}
+
 /**
  * Renders the complete dynamic holographic HUD onto an offscreen canvas texture
  * mapped rigidly onto the 3D curved visor glass dome.
@@ -49,7 +56,12 @@ export class HudCanvasRenderer {
     }
   }
 
-  public update(nowMs: number, elapsedSec: number, gazePitchNorm: number): void {
+  public update(
+    nowMs: number,
+    elapsedSec: number,
+    gazePitchNorm: number,
+    simInputs?: HudSimInputs
+  ): void {
     if (this.lastDrawTime >= 0 && nowMs - this.lastDrawTime < this.minFrameIntervalMs) {
       return;
     }
@@ -65,8 +77,8 @@ export class HudCanvasRenderer {
     const bootProgress = Math.min(1, elapsedSec / timings.frameBootSec);
     const breathAlpha = 0.92 + 0.08 * Math.sin(elapsedSec * 1.4);
 
-    // 1. Periodic sweeping curved triangulated wireframe scan mesh
-    this.drawScanSweep(ctx, W, H, elapsedSec);
+    // 1. Periodic or operator-triggered sweeping curved triangulated wireframe scan mesh
+    this.drawScanSweep(ctx, W, H, elapsedSec, simInputs?.manualScanStartSec);
 
     // 2. Chamfered double-line perimeter brackets
     ctx.save();
@@ -94,7 +106,7 @@ export class HudCanvasRenderer {
     this.drawTopLeftHexBox(ctx, W, H, nowMs, bootProgress);
 
     // 4. Top-right HIGH RAD DETECTED Warning Tab
-    this.drawTopRightAlertBox(ctx, W, H, elapsedSec, bootProgress);
+    this.drawTopRightAlertBox(ctx, W, H, elapsedSec, bootProgress, Boolean(simInputs?.forceRadAlert));
 
     // 5. Left Dynamic 5-Bar Oscillating Histogram + Timeline Axis
     this.drawLeftHistogram(ctx, W, H, elapsedSec);
@@ -106,7 +118,7 @@ export class HudCanvasRenderer {
     this.drawCornerStreams(ctx, W, H, elapsedSec, bootProgress);
 
     // 8. Bottom-center O2 & ATM Life-Support Bars
-    this.drawVitals(ctx, W, H, elapsedSec);
+    this.drawVitals(ctx, W, H, elapsedSec, simInputs?.o2OverridePct, simInputs?.atmOverrideMb);
 
     // 9. Right Pitch-Driven Vertical Elevation / Altitude Tape
     this.drawAltitudeTape(ctx, W, H, elapsedSec, gazePitchNorm, bootProgress);
@@ -118,13 +130,21 @@ export class HudCanvasRenderer {
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
-    elapsedSec: number
+    elapsedSec: number,
+    manualScanStartSec?: number
   ): void {
     const { timings, scanSweep, palette } = HUD_CONFIG;
     let sweepT = -1;
     let sweepAlpha = 0;
 
     if (
+      manualScanStartSec !== undefined &&
+      elapsedSec >= manualScanStartSec &&
+      elapsedSec <= manualScanStartSec + timings.scanSweepDurationSec
+    ) {
+      sweepT = (elapsedSec - manualScanStartSec) / timings.scanSweepDurationSec;
+      sweepAlpha = Math.sin(sweepT * Math.PI) * scanSweep.maxAlphaBoot;
+    } else if (
       elapsedSec >= timings.scanSweepStartSec &&
       elapsedSec <= timings.scanSweepStartSec + timings.scanSweepDurationSec
     ) {
@@ -267,7 +287,8 @@ export class HudCanvasRenderer {
     W: number,
     H: number,
     elapsedSec: number,
-    bootProgress: number
+    bootProgress: number,
+    forceRadAlert: boolean
   ): void {
     const { topRightAlert, timings, palette } = HUD_CONFIG;
     const x = topRightAlert.x * W;
@@ -275,9 +296,10 @@ export class HudCanvasRenderer {
     const w = topRightAlert.w * W;
     const h = topRightAlert.h * H;
 
-    const radActive = elapsedSec >= timings.radAlertDelaySec;
+    const radActive = forceRadAlert || elapsedSec >= timings.radAlertDelaySec;
+    const pulseFreq = forceRadAlert ? timings.radPulseFreqHz * 1.9 : timings.radPulseFreqHz;
     const pulse = radActive
-      ? 0.60 + 0.40 * (0.5 + 0.5 * Math.sin(elapsedSec * timings.radPulseFreqHz * Math.PI * 2))
+      ? 0.60 + 0.40 * (0.5 + 0.5 * Math.sin(elapsedSec * pulseFreq * Math.PI * 2))
       : 0;
 
     ctx.save();
@@ -530,7 +552,9 @@ export class HudCanvasRenderer {
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
-    elapsedSec: number
+    elapsedSec: number,
+    o2OverridePct?: number,
+    atmOverrideMb?: number
   ): void {
     const { vitals, timings, palette } = HUD_CONFIG;
     const x = vitals.x * W;
@@ -542,11 +566,15 @@ export class HudCanvasRenderer {
     const ramp = Math.min(1, Math.max(0, (elapsedSec - 0.15) / timings.vitalsRampDurationSec));
     const o2Val = Math.max(
       0,
-      (vitals.o2.base + vitals.o2.amp * Math.sin(elapsedSec * vitals.o2.freq * Math.PI)) * ramp
+      o2OverridePct !== undefined
+        ? o2OverridePct * ramp
+        : (vitals.o2.base + vitals.o2.amp * Math.sin(elapsedSec * vitals.o2.freq * Math.PI)) * ramp
     );
     const atmVal = Math.max(
       0,
-      (vitals.atm.base + vitals.atm.amp * Math.cos(elapsedSec * vitals.atm.freq * Math.PI)) * ramp
+      atmOverrideMb !== undefined
+        ? atmOverrideMb * ramp
+        : (vitals.atm.base + vitals.atm.amp * Math.cos(elapsedSec * vitals.atm.freq * Math.PI)) * ramp
     );
 
     const o2Ratio = Math.min(1, o2Val / vitals.o2.max);

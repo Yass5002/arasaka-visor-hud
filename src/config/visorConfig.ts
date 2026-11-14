@@ -5,7 +5,7 @@
  */
 
 export const SCENE_CONFIG = {
-  fovDeg: 46,
+  fovDeg: 58,
   nearPlane: 0.03,
   farPlane: 260,
   maxPixelRatio: 2,
@@ -41,7 +41,7 @@ export const SCENE_CONFIG = {
 
 export const MOTION_CONFIG = {
   /** Base overscan ensuring panorama borders never appear across viewports & look limits */
-  panoramaCoverScale: 1.25,
+  panoramaCoverScale: 1.28,
   panoramaAspect: 2400 / 1225,
   /** Angular margin kept between screen ray extremes and panorama image edge (radians) */
   edgeSafetyMarginRad: 0.012,
@@ -108,14 +108,14 @@ export const PANORAMA_CONFIG = {
 } as const;
 
 export const HELMET_GEO_CONFIG = {
-  /** Superellipse outer helmet aperture opening (1:1.42 ratio) at visor glass seal depth */
+  /** Superellipse outer helmet aperture opening (1:1.42 ratio) framed inside 58° 1.42:1 visor viewport */
   aperture: {
     sealZ: -0.285,
     innerRimZ: -0.225,
     browCheekZ: -0.135,
     backWallZ: 0.08,
-    halfWidth: 0.226,
-    halfHeight: 0.159,
+    halfWidth: 0.200,
+    halfHeight: 0.141,
     superellipsePower: 2.85,
     radialSteps: 84,
     ringFlareOutward: 0.065,
@@ -123,8 +123,8 @@ export const HELMET_GEO_CONFIG = {
   },
   /** Sloped matte ballistic-grey inner cheek cowls */
   cheeks: {
-    offsetX: 0.154,
-    offsetY: -0.084,
+    offsetX: 0.144,
+    offsetY: -0.082,
     offsetZ: -0.196,
     width: 0.168,
     height: 0.062,
@@ -176,8 +176,8 @@ export const HELMET_GEO_CONFIG = {
   },
   /** Interior padding bolsters, braided conduit cables, and machined hex bolts */
   details: {
-    paddingCornerX: 0.186,
-    paddingCornerY: 0.112,
+    paddingCornerX: 0.168,
+    paddingCornerY: 0.104,
     paddingCornerZ: -0.215,
     cableRadius: 0.0046,
     boltRadius: 0.0038,
@@ -244,12 +244,12 @@ export const VISOR_GLASS_CONFIG = {
     segmentsW: 72,
     segmentsH: 52,
   },
-  /** Wide 16:9 HUD projection window inside the 170°x120° curved spherical dome */
+  /** HUD projection window sized to hug the 1:1.42 inner helmet frame without wide gaps */
   hudWindowUv: {
-    uMin: 0.306,
-    uMax: 0.694,
-    vMin: 0.357,
-    vMax: 0.651,
+    uMin: 0.301,
+    uMax: 0.699,
+    vMin: 0.329,
+    vMax: 0.685,
   },
   /** Intentionally slightly lower offscreen HUD texture resolution so projected light is never crisp */
   hudTexture: {
@@ -545,5 +545,31 @@ export const HUD_CONFIG = {
     verticalCurveRatio: 0.016,
     maxAlphaBoot: 0.92,
     maxAlphaPeriodic: 0.52,
+  },
+} as const;
+
+export const DASHBOARD_CONFIG = {
+  /** Exact visor optical viewport ratio (170° H / 120° V = 1.4167:1) */
+  visorAspectRatio: 170 / 120,
+  telemetryUiHz: 10,
+  events: {
+    radiationBurstDurationMs: 12000,
+    o2LeakDurationMs: 12000,
+    pressureSurgeDurationMs: 9000,
+    terrainScanDurationMs: 4000,
+  },
+  bounds: {
+    o2Min: 0.06,
+    o2Max: 0.22,
+    o2Step: 0.002,
+    atmMin: 3.5,
+    atmMax: 12.0,
+    atmStep: 0.1,
+    exertionMin: 0.6,
+    exertionMax: 2.2,
+    exertionStep: 0.05,
+    trackingGainMin: 0.4,
+    trackingGainMax: 1.5,
+    trackingGainStep: 0.05,
   },
 } as const;
