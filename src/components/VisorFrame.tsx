@@ -115,21 +115,31 @@ export const VisorFrame: React.FC = () => {
             <stop offset="100%" stopColor="#030405" stopOpacity="0.78" />
           </linearGradient>
 
-          {/* Uneven directional lighting across helmet: warmer upper-right sun catch vs deep shadow lower-left */}
-          <radialGradient id="unevenSunLightShell" cx="84%" cy="14%" r="88%">
-            <stop offset="0%" stopColor="#8e735c" stopOpacity="0.34" />
-            <stop offset="30%" stopColor="#52463d" stopOpacity="0.18" />
-            <stop offset="65%" stopColor="#121418" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="#030405" stopOpacity="0.72" />
+          {/* Uneven directional lighting across helmet: warm orange upper-right vs neutral mid vs deep shadow lower-left */}
+          <radialGradient id="unevenSunLightShell" cx="86%" cy="14%" r="90%">
+            <stop offset="0%" stopColor="#cf7338" stopOpacity="0.42" />
+            <stop offset="28%" stopColor="#8f5330" stopOpacity="0.22" />
+            <stop offset="56%" stopColor="#26282e" stopOpacity="0.24" />
+            <stop offset="100%" stopColor="#020304" stopOpacity="0.82" />
           </radialGradient>
 
-          {/* Uneven rim bevel shading: preserves varied dirty grey mottling on sun side & mid, darker at top/bottom/left */}
+          {/* Uneven rim bevel: darker shadow lower-left -> neutral grey middle -> warm orange highlights upper-right */}
           <linearGradient id="rimBevelUnevenGrad" x1="0.06" y1="0.92" x2="0.92" y2="0.08">
-            <stop offset="0%" stopColor="#090a0d" stopOpacity="0.72" />
-            <stop offset="34%" stopColor="#17191e" stopOpacity="0.55" />
-            <stop offset="62%" stopColor="#2e2d2e" stopOpacity="0.40" />
-            <stop offset="86%" stopColor="#5d4f44" stopOpacity="0.48" />
-            <stop offset="100%" stopColor="#776150" stopOpacity="0.58" />
+            <stop offset="0%" stopColor="#040507" stopOpacity="0.86" />
+            <stop offset="26%" stopColor="#0e1014" stopOpacity="0.72" />
+            <stop offset="50%" stopColor="#34363c" stopOpacity="0.42" />
+            <stop offset="68%" stopColor="#43454b" stopOpacity="0.36" />
+            <stop offset="86%" stopColor="#be6b35" stopOpacity="0.56" />
+            <stop offset="100%" stopColor="#e28748" stopOpacity="0.72" />
+          </linearGradient>
+
+          {/* Soft orange sky-light spill across the inner top brow lip */}
+          <linearGradient id="topSkyOrangeSpill" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#e0884a" stopOpacity="0" />
+            <stop offset="22%" stopColor="#d98042" stopOpacity="0.24" />
+            <stop offset="52%" stopColor="#e89452" stopOpacity="0.44" />
+            <stop offset="82%" stopColor="#f09c5a" stopOpacity="0.62" />
+            <stop offset="100%" stopColor="#e88d4c" stopOpacity="0.26" />
           </linearGradient>
 
           {/* Inner shadow lip turning down into the glass */}
@@ -141,23 +151,23 @@ export const VisorFrame: React.FC = () => {
 
           {/* Padded bolster shading */}
           <linearGradient id="cushionShadeLeft" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#050608" stopOpacity="0.72" />
-            <stop offset="100%" stopColor="#26282e" stopOpacity="0.24" />
+            <stop offset="0%" stopColor="#040507" stopOpacity="0.80" />
+            <stop offset="100%" stopColor="#26282e" stopOpacity="0.26" />
           </linearGradient>
           <linearGradient id="cushionShadeRight" x1="1" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6b5747" stopOpacity="0.30" />
-            <stop offset="100%" stopColor="#07080b" stopOpacity="0.64" />
+            <stop offset="0%" stopColor="#b86634" stopOpacity="0.34" />
+            <stop offset="100%" stopColor="#07080b" stopOpacity="0.66" />
           </linearGradient>
 
           {/* Side temple tab uneven light */}
           <linearGradient id="tabLeftShade" x1="0" y1="0" x2="1" y2="0.4">
-            <stop offset="0%" stopColor="#040507" stopOpacity="0.72" />
-            <stop offset="100%" stopColor="#24272e" stopOpacity="0.26" />
+            <stop offset="0%" stopColor="#030405" stopOpacity="0.84" />
+            <stop offset="100%" stopColor="#1e2127" stopOpacity="0.34" />
           </linearGradient>
           <linearGradient id="tabRightShade" x1="1" y1="0" x2="0" y2="0.4">
-            <stop offset="0%" stopColor="#7c6350" stopOpacity="0.36" />
-            <stop offset="58%" stopColor="#3c342e" stopOpacity="0.20" />
-            <stop offset="100%" stopColor="#0a0b0e" stopOpacity="0.58" />
+            <stop offset="0%" stopColor="#cc733a" stopOpacity="0.42" />
+            <stop offset="56%" stopColor="#453c37" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#0a0b0e" stopOpacity="0.60" />
           </linearGradient>
 
           <clipPath id="visorOpeningClip">
@@ -186,6 +196,10 @@ export const VisorFrame: React.FC = () => {
 
           <filter id="rimInnerSoftBlur" x="-10%" y="-10%" width="120%" height="120%">
             <feGaussianBlur stdDeviation="2.8" />
+          </filter>
+
+          <filter id="topSpillBlur" x="-12%" y="-20%" width="124%" height="140%">
+            <feGaussianBlur stdDeviation="5.5" />
           </filter>
 
           <filter id="glassContactShadow" x="-15%" y="-15%" width="130%" height="130%">
@@ -513,45 +527,66 @@ export const VisorFrame: React.FC = () => {
           filter="url(#rimInnerSoftBlur)"
         />
 
+        {/* Soft orange atmospheric light spill from the bright Mars sky onto the inner top brow edge */}
+        <g clipPath="url(#rimBevelClip)" filter="url(#topSpillBlur)" fill="none" strokeLinecap="round">
+          <path
+            d="M 185,116 C 468,70 714,68 838,93 L 892,107 L 1028,107 L 1082,93 C 1206,68 1456,72 1744,119 C 1812,132 1850,174 1862,250"
+            stroke="url(#topSkyOrangeSpill)"
+            strokeWidth="18"
+          />
+          <path
+            d="M 420,88 C 630,74 795,78 886,105 L 1034,105 C 1135,76 1420,76 1736,118"
+            stroke="url(#topSkyOrangeSpill)"
+            strokeWidth="7"
+          />
+        </g>
+
         {/* Chipped / scuffed composite edge wear (broken irregular strokes — never a solid neon line) */}
         <g filter="url(#rimInnerSoftBlur)" fill="none" strokeLinecap="round">
-          {/* Sun-facing upper-right rim wear */}
+          {/* Warm orange highlights & edge abrasion on upper-right rim */}
           <path
             d="M 1038,94 C 1180,68 1448,72 1744,120 C 1824,136 1860,192 1866,290 L 1872,448"
-            stroke="#887362"
-            strokeOpacity="0.52"
-            strokeWidth="6"
+            stroke="#dc8446"
+            strokeOpacity="0.62"
+            strokeWidth="6.5"
             strokeDasharray="42 18 14 26 68 22"
           />
-          {/* Sun-side brow dirty-grey edge abrasion */}
           <path
             d="M 1160,78 C 1340,74 1560,88 1756,124"
-            stroke="#9a8878"
-            strokeOpacity="0.34"
-            strokeWidth="2.4"
+            stroke="#f2a264"
+            strokeOpacity="0.44"
+            strokeWidth="2.6"
             strokeDasharray="16 28 8 42 26 19"
           />
-          {/* Opposite shadow-side dull scuffed rim edge */}
+          {/* Neutral grey scuffed transition across middle brow & mid rim */}
           <path
-            d="M 882,94 C 740,68 472,72 176,120 C 96,136 60,192 54,290"
-            stroke="#363941"
-            strokeOpacity="0.40"
+            d="M 540,74 C 680,70 780,78 880,96"
+            stroke="#4c4e54"
+            strokeOpacity="0.46"
             strokeWidth="5"
-            strokeDasharray="34 24 12 30"
+            strokeDasharray="28 20 12 24"
           />
-          {/* Lower chin edge wear */}
+          {/* Darker shadow on lower-left rim & left curve */}
+          <path
+            d="M 440,84 C 310,96 220,108 176,120 C 96,136 60,192 54,290 L 48,448 L 48,656 C 56,774 94,854 178,896"
+            stroke="#14161a"
+            strokeOpacity="0.58"
+            strokeWidth="6"
+            strokeDasharray="34 22 14 28"
+          />
+          {/* Lower chin edge wear: warm mid-right transitioning to deep shadow lower-left */}
           <path
             d="M 1228,972 L 1408,938 L 1732,896"
-            stroke="#6a5a4d"
-            strokeOpacity="0.44"
+            stroke="#755a47"
+            strokeOpacity="0.42"
             strokeWidth="4"
             strokeDasharray="28 16 10 24"
           />
           <path
             d="M 692,972 L 512,938 L 188,896"
-            stroke="#34373e"
-            strokeOpacity="0.36"
-            strokeWidth="3.5"
+            stroke="#1e2026"
+            strokeOpacity="0.48"
+            strokeWidth="3.8"
             strokeDasharray="24 20 12 28"
           />
         </g>
@@ -596,8 +631,8 @@ export const VisorFrame: React.FC = () => {
             d="M 0,414 L 54,438 L 78,480 L 78,624 L 54,666 L 0,690 Z"
             fill="url(#tabLeftShade)"
           />
-          <path d="M 4,418 L 54,440 L 74,480" fill="none" stroke="#363942" strokeWidth="2.6" />
-          <path d="M 74,624 L 54,664 L 4,686" fill="none" stroke="#040507" strokeWidth="3.5" />
+          <path d="M 4,418 L 54,440 L 74,480" fill="none" stroke="#22242a" strokeWidth="2.6" />
+          <path d="M 74,624 L 54,664 L 4,686" fill="none" stroke="#030405" strokeWidth="3.8" />
           <path
             d="M 14,474 L 56,488 L 56,616 L 14,630 Z"
             fill="#08090c"
@@ -617,7 +652,7 @@ export const VisorFrame: React.FC = () => {
             d="M 1920,414 L 1866,438 L 1842,480 L 1842,624 L 1866,666 L 1920,690 Z"
             fill="url(#tabRightShade)"
           />
-          <path d="M 1916,418 L 1866,440 L 1846,480" fill="none" stroke="#856b58" strokeWidth="3.2" />
+          <path d="M 1916,418 L 1866,440 L 1846,480" fill="none" stroke="#c8763e" strokeWidth="3.2" />
           <path d="M 1846,624 L 1866,664 L 1916,686" fill="none" stroke="#050608" strokeWidth="3.5" />
           <path
             d="M 1906,474 L 1864,488 L 1864,616 L 1906,630 Z"
