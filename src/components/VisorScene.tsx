@@ -95,6 +95,8 @@ export const VisorScene: React.FC = () => {
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.autoClear = false;
 
     renderer.domElement.style.display = "block";
@@ -257,7 +259,17 @@ export const VisorScene: React.FC = () => {
       SCENE_CONFIG.marsSun.color,
       SCENE_CONFIG.marsSun.intensity
     );
-    sunLight.position.copy(sunDir).multiplyScalar(10);
+    sunLight.position.copy(sunDir).multiplyScalar(2.0);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(1024, 1024);
+    sunLight.shadow.camera.near = 0.5;
+    sunLight.shadow.camera.far = 4.5;
+    sunLight.shadow.camera.left = -0.38;
+    sunLight.shadow.camera.right = 0.38;
+    sunLight.shadow.camera.top = 0.38;
+    sunLight.shadow.camera.bottom = -0.38;
+    sunLight.shadow.bias = -0.0004;
+    sunLight.shadow.normalBias = 0.003;
     scene.add(sunLight);
 
     const bounceDir = new THREE.Vector3(...SCENE_CONFIG.marsGroundBounce.direction).normalize();

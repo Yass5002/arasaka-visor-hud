@@ -15,7 +15,7 @@ export const SCENE_CONFIG = {
    * upper-left sky glow casts rock shadows toward +X / +Z (lower-right).
    */
   marsSun: {
-    direction: [-0.76, 0.54, -0.36] as readonly [number, number, number],
+    direction: [-0.68, 0.50, -0.54] as readonly [number, number, number],
     color: "#ffd9b3",
     intensity: 2.35,
   },
@@ -108,14 +108,14 @@ export const PANORAMA_CONFIG = {
 } as const;
 
 export const HELMET_GEO_CONFIG = {
-  /** Superellipse outer helmet aperture opening (meters) at visor glass seal depth */
+  /** Superellipse outer helmet aperture opening (1:1.42 ratio) at visor glass seal depth */
   aperture: {
     sealZ: -0.285,
     innerRimZ: -0.225,
     browCheekZ: -0.135,
     backWallZ: 0.08,
-    halfWidth: 0.228,
-    halfHeight: 0.124,
+    halfWidth: 0.226,
+    halfHeight: 0.159,
     superellipsePower: 2.85,
     radialSteps: 84,
     ringFlareOutward: 0.065,
@@ -123,14 +123,14 @@ export const HELMET_GEO_CONFIG = {
   },
   /** Sloped matte ballistic-grey inner cheek cowls */
   cheeks: {
-    offsetX: 0.156,
-    offsetY: -0.088,
-    offsetZ: -0.195,
+    offsetX: 0.154,
+    offsetY: -0.084,
+    offsetZ: -0.196,
     width: 0.168,
-    height: 0.058,
+    height: 0.062,
     depth: 0.036,
     bevelSize: 0.007,
-    tiltZDeg: 26,
+    tiltZDeg: 25,
     yawInDeg: 24,
     pitchUpDeg: -14,
   },
@@ -147,26 +147,37 @@ export const HELMET_GEO_CONFIG = {
     bridgeWidth: 0.088,
     bridgeHeight: 0.022,
   },
-  /** Left & right lower sensor / acoustic microphone booms protruding close to the eye */
-  booms: {
-    baseX: 0.118,
-    baseY: -0.092,
-    baseZ: -0.208,
-    tipX: 0.034,
+  /** Single right-side articulated microphone boom mounted flush into the right cheek housing */
+  rightBoom: {
+    /** Anchor embedded inside the right cheek/chin joint */
+    mountX: 0.122,
+    mountY: -0.078,
+    mountZ: -0.200,
+    /** Articulated gooseneck spine curving along chin contour toward mouth-right */
+    elbowX: 0.088,
+    elbowY: -0.072,
+    elbowZ: -0.184,
+    neckX: 0.058,
+    neckY: -0.063,
+    neckZ: -0.174,
+    tipX: 0.036,
     tipY: -0.056,
-    tipZ: -0.172,
-    armWidth: 0.011,
-    armThickness: 0.0075,
-    ribWidth: 0.0042,
-    capsuleRadius: 0.0098,
-    capsuleDepth: 0.0068,
-    capsuleTiltXDeg: -20,
-    capsuleTiltYDeg: 24,
+    tipZ: -0.169,
+    mountPlateWidth: 0.034,
+    mountPlateHeight: 0.026,
+    mountSocketRadius: 0.014,
+    flexRibCount: 6,
+    armBaseRadius: 0.0072,
+    armTipRadius: 0.0052,
+    capsuleRadius: 0.0096,
+    capsuleLength: 0.020,
+    capsuleTiltXDeg: -22,
+    capsuleTiltYDeg: 28,
   },
   /** Interior padding bolsters, braided conduit cables, and machined hex bolts */
   details: {
     paddingCornerX: 0.186,
-    paddingCornerY: 0.094,
+    paddingCornerY: 0.112,
     paddingCornerZ: -0.215,
     cableRadius: 0.0046,
     boltRadius: 0.0038,
@@ -191,14 +202,16 @@ export const HELMET_GEO_CONFIG = {
     paddingColor: "#24252b",
     paddingRoughness: 0.88,
     paddingBumpScale: 0.0032,
-    boomColor: "#17181c",
-    boomRoughness: 0.42,
-    boomMetalness: 0.52,
-    boomRimColor: "#484a52",
-    grilleColor: "#121318",
-    metalFastenerColor: "#757880",
-    metalFastenerRoughness: 0.34,
-    metalFastenerMetalness: 0.82,
+    boomColor: "#191a1f",
+    boomRoughness: 0.44,
+    boomMetalness: 0.50,
+    boomRimColor: "#52555e",
+    socketDarkColor: "#090a0d",
+    windscreenColor: "#141519",
+    windscreenRoughness: 0.94,
+    metalFastenerColor: "#7a7d86",
+    metalFastenerRoughness: 0.32,
+    metalFastenerMetalness: 0.84,
     cableColor: "#1b1c22",
     cableRoughness: 0.68,
   },
@@ -218,31 +231,30 @@ export const HELMET_GEO_CONFIG = {
 } as const;
 
 export const VISOR_GLASS_CONFIG = {
-  /** Ellipsoidal curved visor dome positioned rigidly in headGroup */
+  /** Spherical curved visor dome (120° vertical by 170° horizontal, ~1:1.42 ratio) rigidly in headGroup */
   dome: {
     centerX: 0,
     centerY: 0,
     centerZ: 0.02,
-    radiusX: 0.365,
-    radiusY: 0.295,
+    radiusX: 0.345,
+    radiusY: 0.345,
     radiusZ: 0.345,
-    /** Total curved dome arc (wider than viewport so glass never shows floating cut borders) */
-    arcYawDeg: 92,
-    arcPitchDeg: 62,
-    segmentsW: 64,
-    segmentsH: 44,
+    arcYawDeg: 170,
+    arcPitchDeg: 120,
+    segmentsW: 72,
+    segmentsH: 52,
   },
-  /** Active angular UV window on the dome where projected HUD frame & widgets map */
+  /** Unstretched 1:1.42 angular HUD projection window inside the 170°x120° curved dome */
   hudWindowUv: {
-    uMin: 0.155,
-    uMax: 0.845,
-    vMin: 0.175,
-    vMax: 0.845,
+    uMin: 0.3475,
+    uMax: 0.6525,
+    vMin: 0.348,
+    vMax: 0.652,
   },
-  /** Intentionally slightly lower offscreen HUD texture resolution so projected light is never crisp */
+  /** Offscreen HUD texture matching exact 1:1.42 aspect so nothing stretches across the curved glass */
   hudTexture: {
-    width: 1152,
-    height: 648,
+    width: 1136,
+    height: 800,
     updateFps: 30,
   },
   /** Projected optical light & glass thickness properties (strictly additive over Mars) */
@@ -271,8 +283,8 @@ export const VISOR_GLASS_CONFIG = {
 } as const;
 
 export const HUD_CONFIG = {
-  canvasW: 1152,
-  canvasH: 648,
+  canvasW: 1136,
+  canvasH: 800,
   palette: {
     hudCyan: "#96c2ff",
     hudCyanBright: "#cfe4ff",
@@ -437,20 +449,20 @@ export const HUD_CONFIG = {
     },
   ],
   topLeftBox: {
-    x: 0.274,
+    x: 0.264,
     y: 0.041,
-    w: 0.133,
+    w: 0.155,
     h: 0.117,
     fontSizeRatio: 0.0155,
   },
   topRightAlert: {
-    x: 0.597,
+    x: 0.581,
     y: 0.041,
-    w: 0.133,
+    w: 0.155,
     h: 0.117,
     line1: "HIGH RAD",
     line2: "DETECTED",
-    fontSizeRatio: 0.031,
+    fontSizeRatio: 0.0285,
   },
   leftBars: {
     originX: 0.052,
