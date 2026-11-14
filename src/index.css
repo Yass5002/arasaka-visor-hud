@@ -27,7 +27,7 @@ body,
 }
 
 .visor-frame {
-  /* Full-height locked 170° H × 120° V (~1.42:1) visor viewport at top-left, 0% below, clean right column empty */
+  /* Fixed 1.417:1 (170° H × 120° V) optical visor viewport */
   width: min(80vw, calc(100dvh * 170 / 120));
   aspect-ratio: 170 / 120;
   position: relative;
