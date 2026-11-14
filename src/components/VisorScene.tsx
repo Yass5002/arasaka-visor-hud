@@ -7,25 +7,6 @@ import { buildVisorGlass } from "../three/buildVisorGlass";
 import { HelmetDofComposite } from "../three/HelmetDofComposite";
 import { HudCanvasRenderer } from "../hud/HudCanvasRenderer";
 
-const NOISE_GLSL = /* glsl */ `
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-  }
-
-  float vnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash21(i);
-    float b = hash21(i + vec2(1.0, 0.0));
-    float c = hash21(i + vec2(0.0, 1.0));
-    float d = hash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-  }
-`;
-
 function computePanHalf(viewportAspect: number): [number, number] {
   const { panoramaAspect, panoramaCoverScale } = MOTION_CONFIG;
   const tanHalfY = Math.tan(THREE.MathUtils.degToRad(SCENE_CONFIG.fovDeg * 0.5));
@@ -182,8 +163,6 @@ export const VisorScene: React.FC = () => {
         uNearDist: { value: PANORAMA_CONFIG.nearDist },
         uFarDist: { value: PANORAMA_CONFIG.farDist },
         uDepthExp: { value: PANORAMA_CONFIG.depthExponent },
-        uShimmerX: { value: PANORAMA_CONFIG.horizonShimmerAmpX },
-        uShimmerY: { value: PANORAMA_CONFIG.horizonShimmerAmpY },
         uShadowBase: { value: PANORAMA_CONFIG.shadowLiftBase },
         uShadowBottom: { value: PANORAMA_CONFIG.shadowLiftBottom },
         uShadowLumThresh: { value: PANORAMA_CONFIG.shadowLumThreshold },
@@ -215,27 +194,15 @@ export const VisorScene: React.FC = () => {
         }
       `,
       fragmentShader: /* glsl */ `
-        uniform float uTime;
         uniform sampler2D uTerrainMap;
-        uniform sampler2D uDepthMap;
-        uniform float uShimmerX;
-        uniform float uShimmerY;
         uniform float uShadowBase;
         uniform float uShadowBottom;
         uniform float uShadowLumThresh;
         uniform float uShadowBottomRange;
         varying vec2 vUv;
-        ${NOISE_GLSL}
 
         void main() {
-          float depthSample = texture2D(uDepthMap, vUv).r;
-          float horizonBand = smoothstep(0.0, 0.04, depthSample) * (1.0 - smoothstep(0.05, 0.17, depthSample));
-          vec2 uvSample = vUv;
-          float shimmer = (vnoise(vec2(vUv.x * 58.0 + uTime * 1.4, vUv.y * 92.0 - uTime * 2.6)) - 0.5);
-          uvSample.x += shimmer * uShimmerX * horizonBand;
-          uvSample.y += shimmer * uShimmerY * horizonBand;
-
-          vec4 tex = texture2D(uTerrainMap, uvSample);
+          vec4 tex = texture2D(uTerrainMap, vUv);
           if (tex.a < 0.5) discard;
 
           vec3 col = tex.rgb;
