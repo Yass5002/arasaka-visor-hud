@@ -26,25 +26,27 @@ body,
 .visor-stage {
   --head-x: 0;
   --head-y: 0;
+  --hud-x: 0;
+  --hud-y: 0;
+  --reticle-x: 0;
+  --reticle-y: 0;
+  --helmet-x: 0;
+  --helmet-y: 0;
+  --offset-hud-x: 20px;
+  --offset-hud-y: 14px;
+  --offset-hud-rot: 0.55deg;
+  --offset-reticle-x: 34px;
+  --offset-reticle-y: 22px;
+  --offset-helmet-x: -12px;
+  --offset-helmet-y: -8px;
+  --offset-helmet-rot: -0.45deg;
+  --offset-dome-x: 16px;
+  --offset-dome-y: 9px;
   position: relative;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
   background-color: var(--void-bg);
-}
-
-.mars-canvas-layer {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-}
-
-.mars-canvas-layer canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
 }
 
 .visor-optics-layer {
@@ -53,7 +55,7 @@ body,
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 20;
+  z-index: 10;
 }
 
 .visor-optics-svg {
@@ -64,6 +66,70 @@ body,
   display: block;
 }
 
+.visor-dome-reflections {
+  transform: translate3d(
+    calc(var(--hud-x) * var(--offset-dome-x)),
+    calc(var(--hud-y) * var(--offset-dome-y)),
+    0
+  );
+  will-change: transform;
+}
+
+.visor-hud-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+  perspective: 1100px;
+}
+
+.visor-scan-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: translate3d(
+    calc(var(--hud-x) * var(--offset-hud-x) * 0.65),
+    calc(var(--hud-y) * var(--offset-hud-y) * 0.65),
+    0
+  );
+  will-change: transform;
+}
+
+.visor-hud-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: translate3d(
+      calc(var(--hud-x) * var(--offset-hud-x)),
+      calc(var(--hud-y) * var(--offset-hud-y)),
+      0
+    )
+    rotateY(calc(var(--hud-x) * var(--offset-hud-rot) * -1))
+    rotateX(calc(var(--hud-y) * var(--offset-hud-rot) * 0.6))
+    scale(1.012);
+  will-change: transform;
+}
+
+.visor-reticle-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: translate3d(
+    calc(var(--reticle-x) * var(--offset-reticle-x)),
+    calc(var(--reticle-y) * var(--offset-reticle-y)),
+    0
+  );
+  will-change: transform;
+}
+
 .visor-frame-layer {
   position: absolute;
   inset: 0;
@@ -72,11 +138,12 @@ body,
   pointer-events: none;
   z-index: 30;
   transform: translate3d(
-      calc(var(--head-x) * -7px),
-      calc(var(--head-y) * -5px),
+      calc(var(--helmet-x) * var(--offset-helmet-x)),
+      calc(var(--helmet-y) * var(--offset-helmet-y)),
       0
     )
-    scale(1.016);
+    rotate(calc(var(--helmet-x) * var(--offset-helmet-rot)))
+    scale(1.022);
   will-change: transform;
 }
 

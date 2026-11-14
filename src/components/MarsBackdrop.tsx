@@ -1,8 +1,20 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { MOTION_CONFIG, PALETTE_CONFIG, PANORAMA_CONFIG } from "../config/visorConfig";
+
+export interface VisorRigState {
+  sceneX: number;
+  sceneY: number;
+  hudX: number;
+  hudY: number;
+  reticleX: number;
+  reticleY: number;
+  helmetX: number;
+  helmetY: number;
+}
 
 interface MarsBackdropProps {
-  onHeadMove?: (headX: number, headY: number) => void;
+  onRigMove?: (state: VisorRigState) => void;
 }
 
 const NOISE_GLSL = /* glsl */ `
@@ -22,47 +34,35 @@ const NOISE_GLSL = /* glsl */ `
     float d = hash21(i + vec2(1.0, 1.0));
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
   }
-
-  float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
-    for (int i = 0; i < 4; i++) {
-      v += a * vnoise(p);
-      p = rot * p * 2.03 + vec2(17.1, 31.7);
-      a *= 0.48;
-    }
-    return v;
-  }
 `;
 
-const TEX_ASPECT = 2400 / 1225;
-const FOV_DEG = 46;
-const COVER_SCALE = 1.13;
-
 function computePanHalf(viewportAspect: number): [number, number] {
-  const tanHalfY = Math.tan(THREE.MathUtils.degToRad(FOV_DEG * 0.5));
+  const { fovDeg, panoramaAspect, panoramaCoverScale } = MOTION_CONFIG;
+  const tanHalfY = Math.tan(THREE.MathUtils.degToRad(fovDeg * 0.5));
   const tanHalfX = tanHalfY * viewportAspect;
-  if (viewportAspect <= TEX_ASPECT) {
-    const h = tanHalfY * COVER_SCALE;
-    return [h * TEX_ASPECT, h];
+  if (viewportAspect <= panoramaAspect) {
+    const h = tanHalfY * panoramaCoverScale;
+    return [h * panoramaAspect, h];
   }
-  const w = tanHalfX * COVER_SCALE;
-  return [w, w / TEX_ASPECT];
+  const w = tanHalfX * panoramaCoverScale;
+  return [w, w / panoramaAspect];
+}
+
+function clampUnit(v: number): number {
+  return Math.max(-1, Math.min(1, v));
 }
 
 /**
- * NASA Perseverance panorama (PIA24663) rendered with two 100% opaque layers:
- * 1) Solid Mars sky plane at far distance with slowly drifting cirrus wisps & warm sun scatter.
- * 2) Solid 3D depth-displaced terrain mesh (far rim -> mid plains -> near boulders) with crisp
- *    ridge cutout (alphaTest / discard), subtle heat shimmer & windborne dust haze, and genuine
- *    perspective parallax driven exclusively by heavily damped camera movement (zero transparent
- *    layer overlaps, zero frame blending/trails, zero motion ghosting).
+ * NASA Perseverance panorama (PIA24663) rendered with two opaque 3D depth-displaced meshes:
+ * - Preserves exact raw NASA brightness, clarity, and color (NoColorSpace 1:1 passthrough)
+ * - Smooth damped mouse look with hard clamping (never shows panorama edges)
+ * - Idle breathing that never stops + smooth return-to-center drift when mouse is still
+ * - Multi-tier damped parallax rig driving trailing HUD, reticle, optics, and helmet interior
  */
-export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
+export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onRigMove }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const onHeadMoveRef = useRef(onHeadMove);
-  onHeadMoveRef.current = onHeadMove;
+  const onRigMoveRef = useRef(onRigMove);
+  onRigMoveRef.current = onRigMove;
 
   useEffect(() => {
     const container = mountRef.current;
@@ -72,19 +72,18 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     const height = container.clientHeight || window.innerHeight;
     const initAspect = width / height;
 
-    // Optional URL parameter ?look=x,y for deterministic capture angles
     const params = new URLSearchParams(window.location.search);
     const lookParam = params.get("look");
     let initX = 0;
     let initY = 0;
     if (lookParam) {
       const [lx, ly] = lookParam.split(",").map(Number);
-      if (Number.isFinite(lx)) initX = Math.max(-1, Math.min(1, lx));
-      if (Number.isFinite(ly)) initY = Math.max(-1, Math.min(1, ly));
+      if (Number.isFinite(lx)) initX = clampUnit(lx);
+      if (Number.isFinite(ly)) initY = clampUnit(ly);
     }
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(FOV_DEG, initAspect, 0.5, 300);
+    const camera = new THREE.PerspectiveCamera(MOTION_CONFIG.fovDeg, initAspect, 0.5, 300);
     camera.position.set(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({
@@ -104,61 +103,50 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     container.appendChild(renderer.domElement);
 
     const loader = new THREE.TextureLoader();
-    const configureTex = (tex: THREE.Texture, srgb: boolean) => {
+    const configureTex = (tex: THREE.Texture) => {
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
       tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
-      tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      tex.colorSpace = THREE.NoColorSpace;
       tex.generateMipmaps = false;
       tex.needsUpdate = true;
       return tex;
     };
 
     const base = import.meta.env.BASE_URL;
-    // Keep textures in raw sRGB / NoColorSpace so custom ShaderMaterials render exact raw NASA
-    // image brightness without linear-to-sRGB gamma crushing or color-shift.
-    const skyTex = configureTex(loader.load(`${base}mars/mars-sky.webp`), false);
-    const terrainTex = configureTex(loader.load(`${base}mars/mars-terrain.webp`), false);
-    const depthTex = configureTex(loader.load(`${base}mars/mars-depth.png`), false);
+    const skyTex = configureTex(loader.load(`${base}mars/mars-sky.webp`));
+    const terrainTex = configureTex(loader.load(`${base}mars/mars-terrain.webp`));
+    const depthTex = configureTex(loader.load(`${base}mars/mars-depth.png`));
 
     const [initPanW, initPanH] = computePanHalf(initAspect);
     const sharedUniforms = {
       uTime: { value: 0 },
-      uHead: { value: new THREE.Vector2(initX, initY) },
       uPanHalf: { value: new THREE.Vector2(initPanW, initPanH) },
-      uViewportAspect: { value: initAspect },
     };
 
-    // =========================================================================
-    // 1. OPAQUE SKY LAYER (far background Z = -148)
-    // =========================================================================
     const skyMat = new THREE.ShaderMaterial({
       uniforms: {
         ...sharedUniforms,
         uSkyMap: { value: skyTex },
+        uSkyDist: { value: PANORAMA_CONFIG.skyDist },
       },
       transparent: false,
       depthWrite: true,
       vertexShader: /* glsl */ `
         uniform vec2 uPanHalf;
+        uniform float uSkyDist;
         varying vec2 vUv;
         void main() {
           vUv = uv;
           vec2 p = uv * 2.0 - 1.0;
-          float dist = 148.0;
-          vec3 worldPos = vec3(p.x * uPanHalf.x * dist, p.y * uPanHalf.y * dist, -dist);
+          vec3 worldPos = vec3(p.x * uPanHalf.x * uSkyDist, p.y * uPanHalf.y * uSkyDist, -uSkyDist);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
-        uniform float uTime;
-        uniform vec2 uHead;
-        uniform vec2 uPanHalf;
         uniform sampler2D uSkyMap;
         varying vec2 vUv;
-        ${NOISE_GLSL}
-
         void main() {
           vec3 col = texture2D(uSkyMap, vUv).rgb;
           gl_FragColor = vec4(col, 1.0);
@@ -166,67 +154,69 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
       `,
     });
 
-    // =========================================================================
-    // 2. OPAQUE 3D DEPTH-DISPLACED TERRAIN MESH (far rim -> mid -> near boulders)
-    // =========================================================================
     const terrainMat = new THREE.ShaderMaterial({
       uniforms: {
         ...sharedUniforms,
         uTerrainMap: { value: terrainTex },
         uDepthMap: { value: depthTex },
+        uNearDist: { value: PANORAMA_CONFIG.nearDist },
+        uFarDist: { value: PANORAMA_CONFIG.farDist },
+        uDepthExp: { value: PANORAMA_CONFIG.depthExponent },
+        uShimmerX: { value: PANORAMA_CONFIG.horizonShimmerAmpX },
+        uShimmerY: { value: PANORAMA_CONFIG.horizonShimmerAmpY },
+        uShadowBase: { value: PANORAMA_CONFIG.shadowLiftBase },
+        uShadowBottom: { value: PANORAMA_CONFIG.shadowLiftBottom },
+        uShadowLumThresh: { value: PANORAMA_CONFIG.shadowLumThreshold },
+        uShadowBottomRange: { value: PANORAMA_CONFIG.shadowBottomRange },
       },
       transparent: false,
       depthWrite: true,
       vertexShader: /* glsl */ `
         uniform vec2 uPanHalf;
         uniform sampler2D uDepthMap;
+        uniform float uNearDist;
+        uniform float uFarDist;
+        uniform float uDepthExp;
         varying vec2 vUv;
-        varying float vDepth;
 
         void main() {
           vUv = uv;
           float d = texture2D(uDepthMap, uv).r;
-          vDepth = d;
           vec2 p = uv * 2.0 - 1.0;
-
-          // Map normalized depth (0 = distant ridge, 1 = nearest foreground boulders)
-          // strictly along the camera ray so projection is exact at rest and produces
-          // natural continuous 3D parallax without overlapping semi-transparent slices.
-          float dist = mix(94.0, 22.0, pow(d, 0.90));
+          float dist = mix(uFarDist, uNearDist, pow(d, uDepthExp));
           vec3 worldPos = vec3(p.x * uPanHalf.x * dist, p.y * uPanHalf.y * dist, -dist);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
-        uniform vec2 uHead;
-        uniform vec2 uPanHalf;
         uniform sampler2D uTerrainMap;
         uniform sampler2D uDepthMap;
+        uniform float uShimmerX;
+        uniform float uShimmerY;
+        uniform float uShadowBase;
+        uniform float uShadowBottom;
+        uniform float uShadowLumThresh;
+        uniform float uShadowBottomRange;
         varying vec2 vUv;
-        varying float vDepth;
         ${NOISE_GLSL}
 
         void main() {
-          // Delicate horizon heat shimmer strictly near distant rim
           float depthSample = texture2D(uDepthMap, vUv).r;
           float horizonBand = smoothstep(0.0, 0.04, depthSample) * (1.0 - smoothstep(0.05, 0.17, depthSample));
           vec2 uvSample = vUv;
           float shimmer = (vnoise(vec2(vUv.x * 58.0 + uTime * 1.4, vUv.y * 92.0 - uTime * 2.6)) - 0.5);
-          uvSample.x += shimmer * 0.00055 * horizonBand;
-          uvSample.y += shimmer * 0.00035 * horizonBand;
+          uvSample.x += shimmer * uShimmerX * horizonBand;
+          uvSample.y += shimmer * uShimmerY * horizonBand;
 
           vec4 tex = texture2D(uTerrainMap, uvSample);
-          // Hard cutout along mountain ridge — everything below ridge is 100% opaque
           if (tex.a < 0.5) discard;
 
           vec3 col = tex.rgb;
-
-          // Gently lift deep foreground/bottom shadows without adding contrast or tint
           float lum = dot(col, vec3(0.299, 0.587, 0.114));
-          float shadowMask = 1.0 - smoothstep(0.0, 0.32, lum);
-          float bottomWeight = 1.0 - smoothstep(0.0, 0.42, vUv.y);
-          col = min(vec3(1.0), col + vec3(shadowMask * (0.025 + 0.035 * bottomWeight)));
+          float shadowMask = 1.0 - smoothstep(0.0, uShadowLumThresh, lum);
+          float bottomWeight = 1.0 - smoothstep(0.0, uShadowBottomRange, vUv.y);
+          col = min(vec3(1.0), col + vec3(shadowMask * (uShadowBase + uShadowBottom * bottomWeight)));
 
           gl_FragColor = vec4(col, 1.0);
         }
@@ -234,36 +224,44 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     });
 
     const skyGeo = new THREE.PlaneGeometry(2, 2, 1, 1);
-    const terrainGeo = new THREE.PlaneGeometry(2, 2, 240, 120);
+    const terrainGeo = new THREE.PlaneGeometry(
+      2,
+      2,
+      PANORAMA_CONFIG.meshSegmentsX,
+      PANORAMA_CONFIG.meshSegmentsY
+    );
 
     const skyMesh = new THREE.Mesh(skyGeo, skyMat);
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
-    // Disable frustum culling because PlaneGeometry bounds (-1..1) do not reflect vertex displacement
     skyMesh.frustumCulled = false;
     terrainMesh.frustumCulled = false;
 
     scene.add(skyMesh, terrainMesh);
 
-    // =========================================================================
-    // DAMPED CAMERA MOVEMENT + GENTLE BREATHING SWAY (NO FRAME BLENDING)
-    // =========================================================================
-    let targetX = initX;
-    let targetY = initY;
-    let currentX = initX;
-    let currentY = initY;
-    let breathLagX = initX;
-    let breathLagY = initY;
+    let rawTargetX = initX;
+    let rawTargetY = initY;
+    let pointerX = initX;
+    let pointerY = initY;
+    let sceneX = initX;
+    let sceneY = initY;
+    let hudX = initX;
+    let hudY = initY;
+    let reticleX = initX;
+    let reticleY = initY;
+    let helmetX = initX;
+    let helmetY = initY;
+    let lastPointerTime = lookParam ? performance.now() + 999999 : performance.now() - MOTION_CONFIG.idleReturnDelayMs;
 
     const handlePointerMove = (e: PointerEvent) => {
       const nx = (e.clientX / (window.innerWidth || 1)) * 2 - 1;
       const ny = (e.clientY / (window.innerHeight || 1)) * 2 - 1;
-      targetX = Math.max(-1, Math.min(1, nx));
-      targetY = Math.max(-1, Math.min(1, ny));
+      rawTargetX = clampUnit(nx);
+      rawTargetY = clampUnit(ny);
+      lastPointerTime = performance.now();
     };
 
     const handlePointerLeave = () => {
-      targetX = 0;
-      targetY = 0;
+      lastPointerTime = performance.now() - MOTION_CONFIG.idleReturnDelayMs;
     };
 
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
@@ -273,34 +271,66 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     let prevTime = performance.now();
 
     const animate = (now: number) => {
-      const dt = Math.min(0.05, (now - prevTime) / 1000);
+      const dt = Math.min(0.05, Math.max(0.001, (now - prevTime) / 1000));
       prevTime = now;
       const elapsed = now / 1000;
 
-      // Heavy helmet neck inertia
-      const primaryLerp = 1 - Math.exp(-3.0 * dt);
-      currentX += (targetX - currentX) * primaryLerp;
-      currentY += (targetY - currentY) * primaryLerp;
+      // Drift view target smoothly back to center when mouse is still
+      if (now - lastPointerTime > MOTION_CONFIG.idleReturnDelayMs) {
+        const returnFactor = Math.exp(-MOTION_CONFIG.idleReturnRate * dt);
+        rawTargetX *= returnFactor;
+        rawTargetY *= returnFactor;
+      }
 
-      // Small lagged breathing sway
-      const breathCycle = Math.sin(elapsed * 1.15) * 0.022 + Math.sin(elapsed * 0.52) * 0.010;
-      const lateralMicroSway = Math.cos(elapsed * 0.68) * 0.012;
-      const lagLerp = 1 - Math.exp(-2.1 * dt);
+      const pointerLerp = 1 - Math.exp(-MOTION_CONFIG.pointerDamping * dt);
+      pointerX += (rawTargetX - pointerX) * pointerLerp;
+      pointerY += (rawTargetY - pointerY) * pointerLerp;
 
-      breathLagX += (currentX + lateralMicroSway - breathLagX) * lagLerp;
-      breathLagY += (currentY + breathCycle - breathLagY) * lagLerp;
+      // Continuous idle breathing that never fully stops
+      const { breathing } = MOTION_CONFIG;
+      const breathY =
+        Math.sin(elapsed * breathing.primaryFreqRad) * breathing.primaryAmpY +
+        Math.sin(elapsed * breathing.secondaryFreqRad) * breathing.secondaryAmpY;
+      const breathX =
+        Math.cos(elapsed * breathing.lateralFreqRad) * breathing.lateralAmpX +
+        Math.sin(elapsed * breathing.microDriftFreqRad) * breathing.microDriftAmpX;
 
-      // Apply strictly to the PerspectiveCamera (small heavy translation + subtle yaw/pitch)
-      camera.position.x = breathLagX * 0.55;
-      camera.position.y = -breathLagY * 0.28;
+      const combinedX = clampUnit(pointerX + breathX);
+      const combinedY = clampUnit(pointerY + breathY);
+
+      // Multi-tier damped motion: world camera -> helmet -> HUD -> floating reticle
+      sceneX += (combinedX - sceneX) * (1 - Math.exp(-MOTION_CONFIG.sceneDamping * dt));
+      sceneY += (combinedY - sceneY) * (1 - Math.exp(-MOTION_CONFIG.sceneDamping * dt));
+
+      helmetX += (combinedX - helmetX) * (1 - Math.exp(-MOTION_CONFIG.helmetDamping * dt));
+      helmetY += (combinedY - helmetY) * (1 - Math.exp(-MOTION_CONFIG.helmetDamping * dt));
+
+      hudX += (combinedX - hudX) * (1 - Math.exp(-MOTION_CONFIG.hudTrailDamping * dt));
+      hudY += (combinedY - hudY) * (1 - Math.exp(-MOTION_CONFIG.hudTrailDamping * dt));
+
+      reticleX += (combinedX - reticleX) * (1 - Math.exp(-MOTION_CONFIG.reticleTrailDamping * dt));
+      reticleY += (combinedY - reticleY) * (1 - Math.exp(-MOTION_CONFIG.reticleTrailDamping * dt));
+
+      const clampedCamX = clampUnit(sceneX);
+      const clampedCamY = clampUnit(sceneY);
+      camera.position.x = clampedCamX * MOTION_CONFIG.maxCameraShiftX;
+      camera.position.y = -clampedCamY * MOTION_CONFIG.maxCameraShiftY;
       camera.rotation.order = "YXZ";
-      camera.rotation.y = -breathLagX * 0.026;
-      camera.rotation.x = -breathLagY * 0.017;
+      camera.rotation.y = -clampedCamX * MOTION_CONFIG.maxCameraYawRad;
+      camera.rotation.x = -clampedCamY * MOTION_CONFIG.maxCameraPitchRad;
 
       sharedUniforms.uTime.value = elapsed;
-      sharedUniforms.uHead.value.set(breathLagX, breathLagY);
 
-      onHeadMoveRef.current?.(breathLagX, breathLagY);
+      onRigMoveRef.current?.({
+        sceneX: clampedCamX,
+        sceneY: clampedCamY,
+        hudX: clampUnit(hudX),
+        hudY: clampUnit(hudY),
+        reticleX: clampUnit(reticleX),
+        reticleY: clampUnit(reticleY),
+        helmetX: clampUnit(helmetX),
+        helmetY: clampUnit(helmetY),
+      });
 
       renderer.render(scene, camera);
       animId = requestAnimationFrame(animate);
@@ -313,7 +343,6 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
       const h = container.clientHeight || window.innerHeight;
       const aspect = w / h;
       const [panW, panH] = computePanHalf(aspect);
-      sharedUniforms.uViewportAspect.value = aspect;
       sharedUniforms.uPanHalf.value.set(panW, panH);
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
@@ -348,7 +377,7 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
         inset: 0,
         zIndex: 0,
         overflow: "hidden",
-        background: "#120c08",
+        background: PALETTE_CONFIG.voidBg,
       }}
     />
   );
