@@ -244,17 +244,17 @@ export const VISOR_GLASS_CONFIG = {
     segmentsW: 72,
     segmentsH: 52,
   },
-  /** Unstretched 1:1.42 angular HUD projection window inside the 170°x120° curved dome */
+  /** Wide 16:9 HUD projection window inside the 170°x120° curved spherical dome */
   hudWindowUv: {
-    uMin: 0.3475,
-    uMax: 0.6525,
-    vMin: 0.348,
-    vMax: 0.652,
+    uMin: 0.306,
+    uMax: 0.694,
+    vMin: 0.357,
+    vMax: 0.651,
   },
-  /** Offscreen HUD texture matching exact 1:1.42 aspect so nothing stretches across the curved glass */
+  /** Intentionally slightly lower offscreen HUD texture resolution so projected light is never crisp */
   hudTexture: {
-    width: 1136,
-    height: 800,
+    width: 1152,
+    height: 648,
     updateFps: 30,
   },
   /** Projected optical light & glass thickness properties (strictly additive over Mars) */
@@ -283,8 +283,8 @@ export const VISOR_GLASS_CONFIG = {
 } as const;
 
 export const HUD_CONFIG = {
-  canvasW: 1136,
-  canvasH: 800,
+  canvasW: 1152,
+  canvasH: 648,
   palette: {
     hudCyan: "#96c2ff",
     hudCyanBright: "#cfe4ff",
@@ -449,20 +449,20 @@ export const HUD_CONFIG = {
     },
   ],
   topLeftBox: {
-    x: 0.264,
+    x: 0.274,
     y: 0.041,
-    w: 0.155,
+    w: 0.133,
     h: 0.117,
     fontSizeRatio: 0.0155,
   },
   topRightAlert: {
-    x: 0.581,
+    x: 0.597,
     y: 0.041,
-    w: 0.155,
+    w: 0.133,
     h: 0.117,
     line1: "HIGH RAD",
     line2: "DETECTED",
-    fontSizeRatio: 0.0285,
+    fontSizeRatio: 0.031,
   },
   leftBars: {
     originX: 0.052,

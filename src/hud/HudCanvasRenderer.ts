@@ -432,7 +432,7 @@ export class HudCanvasRenderer {
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(0, H * 0.016);
-    ctx.lineTo(W * 0.178, H * 0.016);
+    ctx.lineTo(W * 0.145, H * 0.016);
     ctx.stroke();
 
     const unitFontPx = Math.round(H * unitBlock.unitFontRatio);
@@ -454,13 +454,13 @@ export class HudCanvasRenderer {
 
       ctx.fillStyle = palette.hudTextDim;
       ctx.font = `600 ${coordFontPx}px ui-monospace, monospace`;
-      ctx.fillText(`${a}/${b}/${c}`, W * 0.068, ry - H * 0.002);
+      ctx.fillText(`${a}/${b}/${c}`, W * 0.056, ry - H * 0.002);
 
       ctx.strokeStyle = "rgba(150, 194, 255, 0.28)";
       ctx.lineWidth = 0.9;
       ctx.beginPath();
-      ctx.moveTo(W * 0.068, ry + H * 0.003);
-      ctx.lineTo(W * 0.175, ry + H * 0.003);
+      ctx.moveTo(W * 0.056, ry + H * 0.003);
+      ctx.lineTo(W * 0.142, ry + H * 0.003);
       ctx.stroke();
     });
 
