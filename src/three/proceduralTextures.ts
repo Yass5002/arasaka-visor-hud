@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { HELMET_GEO_CONFIG } from "../config/visorConfig";
+import { HELMET_GEO_CONFIG, VISOR_GLASS_CONFIG } from "../config/visorConfig";
 
 export interface PbrTextureSet {
   map: THREE.CanvasTexture;
@@ -19,6 +19,33 @@ export interface HelmetTextures {
 function hash2d(x: number, y: number): number {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
   return s - Math.floor(s);
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function smoothNoise2d(x: number, y: number): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = hash2d(xi, yi);
+  const b = hash2d(xi + 1, yi);
+  const c = hash2d(xi, yi + 1);
+  const d = hash2d(xi + 1, yi + 1);
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+}
+
+function fbm2d(x: number, y: number): number {
+  return (
+    smoothNoise2d(x, y) * 0.56 +
+    smoothNoise2d(x * 2.03 + 11.4, y * 2.03 + 7.1) * 0.3 +
+    smoothNoise2d(x * 4.11 + 23.7, y * 4.11 + 19.3) * 0.14
+  );
 }
 
 function makeCanvas(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -297,4 +324,137 @@ export function createHelmetTextures(): HelmetTextures {
       }
     },
   };
+}
+
+/**
+ * Generates an RGBA packed polycarbonate surface map mapped strictly over the visible visor window:
+ * - R: Perimeter Martian regolith dust density (clumped mist + crisp pinpoint mineral specks)
+ * - G: Micro-scratches & cloth wipe swirl arcs (for anisotropic specular glints)
+ * - B: Thermoformed polycarbonate optical mold wave & coating variation
+ * - A: Lower-corner anti-fog edge haze near the chin/cheek rubber seal
+ */
+export function createVisorSurfaceTexture(): THREE.CanvasTexture {
+  const size = VISOR_GLASS_CONFIG.surface.texSize;
+
+  const [, ctxScratch] = makeCanvas(size);
+  ctxScratch.fillStyle = "#000000";
+  ctxScratch.fillRect(0, 0, size, size);
+  ctxScratch.lineCap = "round";
+
+  // Seeded wipe arcs & tiny field micro-scratches mostly outside the central reading sweet spot
+  let seed = 1337;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  for (let i = 0; i < 210; i++) {
+    const angle = rand() * Math.PI * 2;
+    const rad = (0.28 + Math.pow(rand(), 0.72) * 0.68) * (size * 0.5);
+    const sx = size * 0.5 + Math.cos(angle) * rad * 1.08;
+    const sy = size * 0.5 + Math.sin(angle) * rad * 0.88;
+    const dir = rand() * Math.PI * 2;
+    const len = size * (0.018 + rand() * 0.068);
+    const ex = sx + Math.cos(dir) * len;
+    const ey = sy + Math.sin(dir) * len;
+    const bend = (rand() - 0.5) * len * 0.42;
+    const cx = (sx + ex) * 0.5 - Math.sin(dir) * bend;
+    const cy = (sy + ey) * 0.5 + Math.cos(dir) * bend;
+
+    const alpha = 0.06 + rand() * 0.24;
+    ctxScratch.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+    ctxScratch.lineWidth = 0.55 + rand() * 0.65;
+    ctxScratch.beginPath();
+    ctxScratch.moveTo(sx, sy);
+    ctxScratch.quadraticCurveTo(cx, cy, ex, ey);
+    ctxScratch.stroke();
+  }
+
+  // Concentric soft microfiber cloth wipe arcs around peripheral zones
+  for (let i = 0; i < 36; i++) {
+    const centerR = size * (0.36 + rand() * 0.25);
+    const a0 = rand() * Math.PI * 2;
+    const arcLen = 0.22 + rand() * 0.45;
+    const cx = size * 0.5 + (rand() - 0.5) * size * 0.22;
+    const cy = size * 0.5 + (rand() - 0.5) * size * 0.22;
+    const alpha = 0.04 + rand() * 0.09;
+    ctxScratch.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+    ctxScratch.lineWidth = 0.75 + rand() * 0.55;
+    ctxScratch.beginPath();
+    ctxScratch.arc(cx, cy, centerR, a0, a0 + arcLen);
+    ctxScratch.stroke();
+  }
+
+  const [, ctxDust] = makeCanvas(size);
+  ctxDust.fillStyle = "#000000";
+  ctxDust.fillRect(0, 0, size, size);
+  for (let i = 0; i < 1600; i++) {
+    const angle = rand() * Math.PI * 2;
+    const edgeBias = 0.42 + Math.pow(rand(), 0.48) * 0.58;
+    const px = size * 0.5 + Math.cos(angle) * edgeBias * size * 0.54;
+    const py = size * 0.5 + Math.sin(angle) * edgeBias * size * 0.52;
+    const r = 0.45 + Math.pow(rand(), 2.2) * 1.75;
+    const bright = 0.14 + rand() * 0.78;
+    ctxDust.fillStyle = `rgba(255, 255, 255, ${bright.toFixed(3)})`;
+    ctxDust.beginPath();
+    ctxDust.arc(px, py, r, 0, Math.PI * 2);
+    ctxDust.fill();
+  }
+
+  const [cOut, ctxOut] = makeCanvas(size);
+  const scratchData = ctxScratch.getImageData(0, 0, size, size).data;
+  const dustSpecks = ctxDust.getImageData(0, 0, size, size).data;
+  const outImg = ctxOut.createImageData(size, size);
+
+  for (let y = 0; y < size; y++) {
+    const v = y / (size - 1);
+    const dv = (v - 0.5) * 2.0;
+    for (let x = 0; x < size; x++) {
+      const u = x / (size - 1);
+      const du = (u - 0.5) * 2.0;
+      const idx = (y * size + x) * 4;
+
+      // Elliptical sightline clearance mask (preserves central optical window crystal clarity)
+      const rEllip = Math.hypot(du * 1.02, dv * 1.18);
+      const centerClearMask = smoothstep(0.36, 0.86, rEllip);
+      const perimeterMask = smoothstep(0.44, 0.96, rEllip);
+      const borderGuard = smoothstep(0.0, 0.015, Math.min(Math.min(u, 1 - u), Math.min(v, 1 - v)));
+
+      // R: Fine perimeter Martian regolith haze + pinpoint dust particles
+      const dustNoise = fbm2d(u * 9.5 + 3.1, v * 9.5 + 5.7);
+      const mistDust = Math.pow(Math.max(0, dustNoise - 0.28) / 0.72, 1.45) * 0.48 * perimeterMask;
+      const speckDust = (dustSpecks[idx] / 255) * (0.08 + 0.92 * centerClearMask);
+      const dustVal = Math.min(255, Math.round((mistDust + speckDust) * borderGuard * 255));
+
+      // G: Micro-scratches & wipe swirls muted tightly in central sightline
+      const scratchRaw = scratchData[idx] / 255;
+      const scratchMask = (0.12 + 0.88 * smoothstep(0.24, 0.78, rEllip)) * borderGuard;
+      const scratchVal = Math.min(255, Math.round(scratchRaw * scratchMask * 255));
+
+      // B: Organic thermoformed polycarbonate mold wave & thin-film variation
+      const wave = fbm2d(u * 4.2 + 17.3, v * 4.2 + 9.8);
+      const waveVal = Math.max(0, Math.min(255, Math.round(wave * 255)));
+
+      // A: Faint lower-chin & corner anti-fog rim haze (canvas y bottom -> UV v bottom after flipY)
+      const lowerWeight = smoothstep(0.45, 0.98, v) * smoothstep(0.35, 0.92, Math.abs(du));
+      const fogNoise = fbm2d(u * 6.0 + 21.0, v * 6.0 + 13.0);
+      const fogVal = Math.min(255, Math.round(lowerWeight * (0.4 + 0.6 * fogNoise) * 255));
+
+      outImg.data[idx] = dustVal;
+      outImg.data[idx + 1] = scratchVal;
+      outImg.data[idx + 2] = waveVal;
+      outImg.data[idx + 3] = fogVal;
+    }
+  }
+
+  ctxOut.putImageData(outImg, 0, 0);
+  const tex = new THREE.CanvasTexture(cOut);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
 }

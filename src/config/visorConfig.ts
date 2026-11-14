@@ -236,18 +236,25 @@ export const HELMET_GEO_CONFIG = {
 } as const;
 
 export const VISOR_GLASS_CONFIG = {
-  /** Spherical curved visor dome (120° vertical by 170° horizontal, ~1:1.42 ratio) rigidly in headGroup */
+  /** Compound-curved pressurized EVA polycarbonate dome seated inside helmet aperture */
   dome: {
     centerX: 0,
     centerY: 0,
+    centerZ: -0.04,
+    radiusX: 0.222,
+    radiusY: 0.16,
+    radiusZ: 0.285,
+    arcYawDeg: 180,
+    arcPitchDeg: 140,
+    segmentsW: 84,
+    segmentsH: 60,
+  },
+  /** Reference eye-centered projection sphere preserving calibrated HUD angular layout */
+  hudCalibrationSphere: {
     centerZ: 0.02,
-    radiusX: 0.345,
-    radiusY: 0.345,
-    radiusZ: 0.345,
+    radius: 0.345,
     arcYawDeg: 170,
     arcPitchDeg: 120,
-    segmentsW: 72,
-    segmentsH: 52,
   },
   /** HUD projection window sized to hug the 1:1.42 inner helmet frame without wide gaps */
   hudWindowUv: {
@@ -262,7 +269,22 @@ export const VISOR_GLASS_CONFIG = {
     height: 1152,
     updateFps: 30,
   },
-  /** Projected optical light & glass thickness properties (naturally readable & realistically possible) */
+  /** Procedural polycarbonate surface imperfections (dust, hairline wipe scratches, mold wave, edge fog) */
+  surface: {
+    texSize: 1024,
+    uvPad: 0.12,
+    bumpStrengthWave: 0.016,
+    bumpStrengthScratch: 0.055,
+    dustReflectColor: "#d98f5c",
+    dustScatterColor: "#ffd4ab",
+    dustReflectOpacity: 0.24,
+    dustScatterOpacity: 0.32,
+    scratchGlintColor: "#fff1df",
+    scratchGlintOpacity: 0.22,
+    edgeFogColor: "#a8bfd8",
+    edgeFogOpacity: 0.08,
+  },
+  /** Projected optical light, physical Fresnel reflections, thin-film coating & glass thickness */
   optics: {
     /** Overall see-through projected light intensity */
     hudIntensity: 1.02,
@@ -274,16 +296,33 @@ export const VISOR_GLASS_CONFIG = {
     /** Faint secondary ghost reflection from thick curved visor glass */
     ghostOffsetUv: [0.0022, -0.0016] as readonly [number, number],
     ghostViewParallax: 0.008,
-    ghostOpacity: 0.07,
+    ghostOpacity: 0.075,
     /** Subtle RGB chromatic aberration only at the far curved glass perimeter */
     chromaticEdgeStrength: 0.0016,
     chromaticPower: 1.75,
-    /** Very faint additive curved dome specular sheen from Martian sun & grazing Fresnel */
-    domeSpecularOpacity: 0.055,
+    /** Physical polycarbonate Fresnel + gold-neutral AR thin-film coating */
+    fresnelF0: 0.035,
+    fresnelEdgeOpacity: 0.28,
+    fresnelPower: 2.35,
+    iridescenceStrength: 0.38,
+    iridescenceBaseNm: 315,
+    iridescenceWaveNm: 85,
+    /** Perimeter ambient occlusion shadow where the curved glass seats into the gasket bezel */
+    bezelShadowColor: "#040609",
+    bezelShadowOpacity: 0.34,
+    /** Outer & inner Martian sun specular lobes */
     domeSpecularColor: "#ffe4c8",
-    domeFresnelOpacity: 0.028,
-    domeFresnelPower: 3.4,
-    domeFresnelColor: "#9dc5ff",
+    domeSpecularOpacity: 0.22,
+    domeSpecularBroadOpacity: 0.09,
+    /** Grazing Mars sky rim & world-space Fresnel coating */
+    domeFresnelColor: "#d9b08e",
+    domeFresnelOpacity: 0.18,
+    domeFresnelPower: 2.6,
+    /** Faint concave cavity reflection of internal HUD glow & upper brow projector LED */
+    cavityReflectionOpacity: 0.14,
+    cavityHudBounceOpacity: 0.055,
+    projectorBounceColor: "#6daeff",
+    projectorBounceOpacity: 0.13,
   },
 } as const;
 
