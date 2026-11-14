@@ -41,7 +41,7 @@ export const SCENE_CONFIG = {
 
 export const MOTION_CONFIG = {
   /** Overscan covering shifted eye-level horizon so panorama borders never appear across look limits */
-  panoramaCoverScale: 2.15,
+  panoramaCoverScale: 1.92,
   panoramaAspect: 2400 / 1225,
   /** Angular margin kept between screen ray extremes and panorama image edge (radians) */
   edgeSafetyMarginRad: 0.012,

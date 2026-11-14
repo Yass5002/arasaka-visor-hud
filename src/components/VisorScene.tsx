@@ -138,7 +138,7 @@ export const VisorScene: React.FC = () => {
         void main() {
           vUv = uv;
           vec2 p = uv * 2.0 - 1.0;
-          float skyY = mix(-1.2, 3.2, uv.y);
+          float skyY = mix(-1.0, 2.0, uv.y);
           vec3 worldPos = vec3(
             p.x * uPanHalf.x * uSkyDist,
             (skyY - uHorizonBias) * uPanHalf.y * uSkyDist,
@@ -185,11 +185,10 @@ export const VisorScene: React.FC = () => {
           vUv = uv;
           float d = texture2D(uDepthMap, uv).r;
           vec2 p = uv * 2.0 - 1.0;
-          float terrainY = mix(-2.2, 1.0, uv.y);
           float dist = mix(uFarDist, uNearDist, pow(d, uDepthExp));
           vec3 worldPos = vec3(
             p.x * uPanHalf.x * dist,
-            (terrainY - uHorizonBias) * uPanHalf.y * dist,
+            (p.y - uHorizonBias) * uPanHalf.y * dist,
             -dist
           );
           gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
@@ -407,14 +406,14 @@ export const VisorScene: React.FC = () => {
       );
       const maxSafePitchUp = Math.max(
         0.01,
-        Math.atan((3.2 - PANORAMA_CONFIG.horizonBias) * panH) -
+        Math.atan((2.0 - PANORAMA_CONFIG.horizonBias) * panH) -
           Math.atan(tanHalfY) -
           MOTION_CONFIG.edgeSafetyMarginRad -
           maxShiftAngular
       );
       const maxSafePitchDown = Math.max(
         0.01,
-        Math.atan((2.2 + PANORAMA_CONFIG.horizonBias) * panH) -
+        Math.atan((1.0 + PANORAMA_CONFIG.horizonBias) * panH) -
           Math.atan(tanHalfY) -
           MOTION_CONFIG.edgeSafetyMarginRad -
           maxShiftAngular
