@@ -59,33 +59,33 @@ export const VisorOptics: React.FC = () => {
       >
         <defs>
           {/* Warm soft diagonal sunlight glare sweeping from upper-right sun */}
-          <linearGradient id="diagonalSunGlare" x1="0.88" y1="0.06" x2="0.28" y2="0.68">
-            <stop offset="0%" stopColor="#ffd7a8" stopOpacity="0.16" />
-            <stop offset="32%" stopColor="#f5b47c" stopOpacity="0.075" />
-            <stop offset="68%" stopColor="#df8f58" stopOpacity="0.022" />
-            <stop offset="100%" stopColor="#df8f58" stopOpacity="0" />
+          <linearGradient id="diagonalSunGlare" x1="0.88" y1="0.06" x2="0.24" y2="0.72">
+            <stop offset="0%" stopColor="#ffe1b8" stopOpacity="0.19" />
+            <stop offset="30%" stopColor="#f6bc88" stopOpacity="0.095" />
+            <stop offset="65%" stopColor="#df925c" stopOpacity="0.028" />
+            <stop offset="100%" stopColor="#df925c" stopOpacity="0" />
           </linearGradient>
 
           {/* Secondary curved visor edge specular sweep */}
           <linearGradient id="curvedRimSpecular" x1="0.25" y1="0" x2="0.95" y2="0.55">
             <stop offset="0%" stopColor="#ffdfb8" stopOpacity="0" />
-            <stop offset="55%" stopColor="#f8c28c" stopOpacity="0.048" />
-            <stop offset="85%" stopColor="#f8c28c" stopOpacity="0.075" />
+            <stop offset="55%" stopColor="#f8c28c" stopOpacity="0.055" />
+            <stop offset="85%" stopColor="#f8c28c" stopOpacity="0.09" />
             <stop offset="100%" stopColor="#ffdfb8" stopOpacity="0" />
           </linearGradient>
 
           {/* Ghost reflection gradient for helmet interior reflected on glass */}
           <linearGradient id="interiorGhostGrad" x1="0.5" y1="1" x2="0.5" y2="0">
-            <stop offset="0%" stopColor="#e8c3a0" stopOpacity="0.065" />
-            <stop offset="45%" stopColor="#c9a586" stopOpacity="0.032" />
+            <stop offset="0%" stopColor="#edd0b2" stopOpacity="0.105" />
+            <stop offset="50%" stopColor="#cfa98a" stopOpacity="0.048" />
             <stop offset="100%" stopColor="#b08b6e" stopOpacity="0" />
           </linearGradient>
 
           {/* Sun-proximity radial mask: dust specks & smudges ONLY catch light near upper-right sun */}
-          <radialGradient id="sunProximityGrad" cx="79%" cy="15%" r="32%">
+          <radialGradient id="sunProximityGrad" cx="78%" cy="17%" r="29%">
             <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-            <stop offset="45%" stopColor="#cccccc" stopOpacity="0.55" />
-            <stop offset="82%" stopColor="#333333" stopOpacity="0.12" />
+            <stop offset="42%" stopColor="#d4d4d4" stopOpacity="0.62" />
+            <stop offset="78%" stopColor="#2c2c2c" stopOpacity="0.10" />
             <stop offset="100%" stopColor="#000000" stopOpacity="0" />
           </radialGradient>
           <mask id="sunProximityMask">
@@ -127,34 +127,40 @@ export const VisorOptics: React.FC = () => {
           {/* Faint reflected lower mandible & acoustic bridge ghost along bottom third */}
           <path
             d="
-              M 160,885
-              C 280,910 470,922 690,944
-              L 825,934 L 875,952 L 1045,952 L 1095,934 L 1230,944
-              C 1450,922 1640,910 1760,885
-              L 1720,835
-              C 1590,872 1410,892 1220,906
-              L 1085,896 L 1038,912 L 882,912 L 835,896 L 700,906
-              C 510,892 330,872 200,835 Z
+              M 176,858
+              C 295,884 480,896 692,918
+              L 826,908 L 872,928 L 1048,928 L 1094,908 L 1228,918
+              C 1440,896 1625,884 1744,858
+              L 1706,808
+              C 1580,845 1405,866 1222,880
+              L 1086,870 L 1040,888 L 880,888 L 834,870 L 698,880
+              C 515,866 340,845 214,808 Z
             "
             fill="url(#interiorGhostGrad)"
           />
           {/* Faint reflected rebreather rib ghost ticks */}
-          <g stroke="#e6c09c" strokeOpacity="0.045" strokeWidth="4">
-            <line x1="912" y1="918" x2="912" y2="946" />
-            <line x1="944" y1="918" x2="944" y2="946" />
-            <line x1="976" y1="918" x2="976" y2="946" />
-            <line x1="1008" y1="918" x2="1008" y2="946" />
+          <g stroke="#edd0b2" strokeOpacity="0.072" strokeWidth="4.5">
+            <line x1="908" y1="892" x2="908" y2="922" />
+            <line x1="942" y1="892" x2="942" y2="922" />
+            <line x1="978" y1="892" x2="978" y2="922" />
+            <line x1="1012" y1="892" x2="1012" y2="922" />
           </g>
+          {/* Faint reflected upper brow edge ghost near top curve */}
+          <path
+            d="M 420,122 C 660,98 840,104 892,132 L 1028,132 C 1080,104 1260,98 1500,122 C 1270,136 1100,136 1028,154 L 892,154 C 820,136 650,136 420,122 Z"
+            fill="#e8c3a2"
+            fillOpacity="0.042"
+          />
           {/* Faint curved side cheek/temple interior reflection along left & right edges */}
           <path
-            d="M 105,310 C 145,420 155,585 125,750 C 98,645 92,470 105,310 Z"
-            fill="#d6b496"
-            fillOpacity="0.032"
+            d="M 108,290 C 148,405 158,575 126,745 C 98,640 94,460 108,290 Z"
+            fill="#dec0a4"
+            fillOpacity="0.052"
           />
           <path
-            d="M 1815,310 C 1775,420 1765,585 1795,750 C 1822,645 1828,470 1815,310 Z"
-            fill="#e6be98"
-            fillOpacity="0.042"
+            d="M 1812,290 C 1772,405 1762,575 1794,745 C 1822,640 1826,460 1812,290 Z"
+            fill="#ecc9a8"
+            fillOpacity="0.068"
           />
         </g>
 
@@ -162,14 +168,14 @@ export const VisorOptics: React.FC = () => {
             2. SOFT WARM DIAGONAL SUN GLARE ON THE CURVED GLASS
            ============================================================ */}
         <g className="visor-optics-reflections" filter="url(#glareBlur)">
-          {/* Soft diagonal sunlight shaft across upper-right quadrant toward center */}
+          {/* Soft diagonal sunlight shaft across upper-right quadrant toward lower-mid-left */}
           <path
-            d="M 1180,35 L 1790,70 L 1820,260 L 820,660 L 610,510 Z"
+            d="M 1190,62 L 1780,104 L 1812,290 L 790,695 L 590,545 Z"
             fill="url(#diagonalSunGlare)"
           />
           {/* Subtle upper curved visor dome specular arc */}
           <path
-            d="M 480,68 C 860,34 1280,44 1690,108 C 1460,152 1020,118 590,178 C 460,196 410,118 480,68 Z"
+            d="M 480,108 C 860,72 1280,82 1690,148 C 1460,188 1020,156 590,214 C 460,230 410,154 480,108 Z"
             fill="url(#curvedRimSpecular)"
           />
         </g>
@@ -178,26 +184,26 @@ export const VisorOptics: React.FC = () => {
             3. DUST SPECKS & SMUDGES (ONLY CATCHING LIGHT NEAR THE SUN)
            ============================================================ */}
         <g className="visor-optics-specks" mask="url(#sunProximityMask)">
-          {/* Soft warm-lit translucent smudges/finger-wipe haze near upper-right sun */}
-          <g filter="url(#smudgeBlur)" fill="#ffd8b0">
-            <ellipse cx="1495" cy="188" rx="74" ry="26" transform="rotate(-24 1495 188)" fillOpacity="0.065" />
-            <ellipse cx="1605" cy="256" rx="52" ry="18" transform="rotate(-14 1605 256)" fillOpacity="0.055" />
-            <ellipse cx="1360" cy="142" rx="48" ry="16" transform="rotate(-32 1360 142)" fillOpacity="0.045" />
+          {/* Soft warm-lit translucent smudges near upper-right sun */}
+          <g filter="url(#smudgeBlur)" fill="#ffe0bd">
+            <ellipse cx="1495" cy="204" rx="72" ry="24" transform="rotate(-24 1495 204)" fillOpacity="0.075" />
+            <ellipse cx="1605" cy="270" rx="50" ry="17" transform="rotate(-14 1605 270)" fillOpacity="0.065" />
+            <ellipse cx="1362" cy="166" rx="46" ry="15" transform="rotate(-32 1362 166)" fillOpacity="0.055" />
           </g>
 
-          {/* A few out-of-focus warm-lit dust specks near the sun */}
-          <g filter="url(#dustBlur)" fill="#ffe4c4">
-            <circle cx="1420" cy="152" r="1.8" fillOpacity="0.34" />
-            <circle cx="1468" cy="196" r="1.1" fillOpacity="0.28" />
-            <circle cx="1524" cy="138" r="2.2" fillOpacity="0.38" />
-            <circle cx="1558" cy="218" r="1.4" fillOpacity="0.30" />
-            <circle cx="1612" cy="166" r="1.9" fillOpacity="0.36" />
-            <circle cx="1645" cy="238" r="1.2" fillOpacity="0.28" />
-            <circle cx="1690" cy="184" r="1.6" fillOpacity="0.32" />
-            <circle cx="1585" cy="292" r="1.3" fillOpacity="0.24" />
-            <circle cx="1340" cy="210" r="1.1" fillOpacity="0.22" />
-            <circle cx="1725" cy="264" r="1.4" fillOpacity="0.25" />
-            <circle cx="1475" cy="272" r="1.0" fillOpacity="0.22" />
+          {/* Few out-of-focus warm-lit dust specks catching sunlight near the sun */}
+          <g filter="url(#dustBlur)" fill="#ffebd2">
+            <circle cx="1420" cy="178" r="2.0" fillOpacity="0.54" />
+            <circle cx="1468" cy="216" r="1.3" fillOpacity="0.46" />
+            <circle cx="1524" cy="162" r="2.3" fillOpacity="0.62" />
+            <circle cx="1558" cy="236" r="1.5" fillOpacity="0.48" />
+            <circle cx="1612" cy="186" r="2.1" fillOpacity="0.58" />
+            <circle cx="1645" cy="254" r="1.4" fillOpacity="0.46" />
+            <circle cx="1690" cy="202" r="1.8" fillOpacity="0.52" />
+            <circle cx="1585" cy="304" r="1.4" fillOpacity="0.38" />
+            <circle cx="1340" cy="226" r="1.2" fillOpacity="0.36" />
+            <circle cx="1725" cy="278" r="1.5" fillOpacity="0.42" />
+            <circle cx="1475" cy="288" r="1.2" fillOpacity="0.36" />
           </g>
 
           {/* Tiny hairline micro-scratches catching sun glare */}
