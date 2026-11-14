@@ -4,4 +4,13 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "./",
   plugins: [react()],
+  server: {
+    proxy: {
+      "/api-proxy": {
+        target: "https://api.nasa.yssn.tech",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-proxy/, ""),
+      },
+    },
+  },
 });

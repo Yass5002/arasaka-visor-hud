@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
+import type { AssistantCaptionState } from "../assistant/assistantController";
 import { MOTION_CONFIG, PANORAMA_CONFIG, SCENE_CONFIG } from "../config/visorConfig";
+import type { LiveState } from "../engine/types";
 import { createHelmetTextures } from "../three/proceduralTextures";
 import { buildHelmetGroup } from "../three/buildHelmetGroup";
 import { buildVisorGlass } from "../three/buildVisorGlass";
@@ -35,7 +37,16 @@ function clampSigned(v: number, maxAbs: number): number {
  * - Projected HUD rendered onto the 3D curved dome mesh (soft blur, bloom, ghost, edge chromatic fringe)
  * - Near-eye foreground helmet parts composited with real 3D distance-based Depth-of-Field blur
  */
-export const VisorScene: React.FC = () => {
+export interface VisorSceneProps {
+  liveStateRef?: React.MutableRefObject<LiveState | null>;
+  captionRef?: React.MutableRefObject<AssistantCaptionState | null>;
+  terrainId?: "mars" | "moon" | "orbit";
+}
+
+export const VisorScene: React.FC<VisorSceneProps> = ({
+  liveStateRef,
+  captionRef,
+}) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -449,7 +460,13 @@ export const VisorScene: React.FC = () => {
       panUniforms.uTime.value = absElapsed;
       const pitchNormRef = rawTotalPitch >= 0 ? maxSafePitchUp : maxSafePitchDown;
       const pitchNorm = -(headPitch + eyePitch) / Math.max(0.01, pitchNormRef);
-      hudRenderer.update(now, elapsedSec, pitchNorm);
+      hudRenderer.update(
+        now,
+        elapsedSec,
+        pitchNorm,
+        liveStateRef?.current ?? null,
+        captionRef?.current ?? null
+      );
       visorGlass.updateUniforms(camera.matrixWorldInverse);
 
       // Pass 1: Untouched Mars panorama directly to screen

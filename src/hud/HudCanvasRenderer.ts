@@ -1,24 +1,24 @@
 import * as THREE from "three";
+import type { AssistantCaptionState } from "../assistant/assistantController";
 import { HUD_CONFIG, VISOR_GLASS_CONFIG } from "../config/visorConfig";
-
-interface StreamLineSpec {
-  wRatio: number;
-  indentRatio: number;
-  bright: boolean;
-}
+import type { AlertClass, LiveState } from "../engine/types";
 
 /**
- * Renders the complete dynamic holographic HUD onto an offscreen canvas texture
- * mapped rigidly onto the 3D curved visor glass dome.
- * - No center target reticle/aim
- * - All telemetry, bars, hex tabs, alert pulses, streams, altitude tape, and scan mesh
- *   are animated every tick and driven solely by HUD_CONFIG.
+ * Dynamic holographic HUD rendered onto an offscreen canvas texture mapped onto
+ * the 3D curved visor dome (CONOPS Section 4 & ARASAKA-SIM-001 SIM-HUD-001..005).
+ *
+ * Strictly driven by Engine `LiveState` + `AssistantCaptionState`:
+ * - Center sightline remains unobstructed (no target reticle).
+ * - NASA SUITS peripheral layout: radiation/air left, alert/protocol top-right,
+ *   mission day/context top-left, suit/cabin pressure & vitals lower-left/center,
+ *   voice caption bottom-center, pitch tape right.
+ * - Slow modelled indicators (bone_loss_*, immune_index, cognitive_drift, sans_risk)
+ *   are kept off the visor alert/gauge surfaces (SIM-HUD-001).
  */
 export class HudCanvasRenderer {
   public readonly canvas: HTMLCanvasElement;
   public readonly texture: THREE.CanvasTexture;
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly streamLines: StreamLineSpec[];
   private lastDrawTime = -1;
   private readonly minFrameIntervalMs: number;
 
@@ -35,21 +35,53 @@ export class HudCanvasRenderer {
     this.texture.generateMipmaps = false;
 
     this.minFrameIntervalMs = 1000 / VISOR_GLASS_CONFIG.hudTexture.updateFps;
+  }
 
-    const { lineCount } = HUD_CONFIG.cornerStreams;
-    this.streamLines = [];
-    for (let i = 0; i < lineCount; i++) {
-      const seed = Math.sin(i * 12.9898) * 43758.5453;
-      const frac = seed - Math.floor(seed);
-      this.streamLines.push({
-        wRatio: 0.24 + frac * 0.56,
-        indentRatio: i % 5 === 0 ? 0 : 0.06 + (i % 3) * 0.045,
-        bright: i % 4 === 0,
-      });
+  private getAlertColors(alertClass: AlertClass): {
+    stroke: string;
+    glow: string;
+    fill: string;
+    text: string;
+  } {
+    switch (alertClass) {
+      case 1:
+        return {
+          stroke: "#ff4828",
+          glow: "rgba(255, 72, 40, 0.90)",
+          fill: "rgba(221, 54, 28, 0.24)",
+          text: "#ffb8ad",
+        };
+      case 2:
+        return {
+          stroke: "#ff4828",
+          glow: "rgba(255, 72, 40, 0.72)",
+          fill: "rgba(221, 54, 28, 0.16)",
+          text: "#ffc4b8",
+        };
+      case 3:
+        return {
+          stroke: "#ffb84d",
+          glow: "rgba(255, 184, 77, 0.70)",
+          fill: "rgba(255, 184, 77, 0.14)",
+          text: "#ffe2b0",
+        };
+      default:
+        return {
+          stroke: HUD_CONFIG.palette.hudCyan,
+          glow: HUD_CONFIG.palette.hudCyanGlow,
+          fill: "rgba(6, 31, 74, 0.34)",
+          text: HUD_CONFIG.palette.hudTextWhite,
+        };
     }
   }
 
-  public update(nowMs: number, elapsedSec: number, gazePitchNorm: number): void {
+  public update(
+    nowMs: number,
+    elapsedSec: number,
+    gazePitchNorm: number,
+    liveState: LiveState | null = null,
+    captionState: AssistantCaptionState | null = null
+  ): void {
     if (this.lastDrawTime >= 0 && nowMs - this.lastDrawTime < this.minFrameIntervalMs) {
       return;
     }
@@ -58,22 +90,24 @@ export class HudCanvasRenderer {
     const ctx = this.ctx;
     const W = this.canvas.width;
     const H = this.canvas.height;
-    const { palette, timings } = HUD_CONFIG;
+    const { timings } = HUD_CONFIG;
 
     ctx.clearRect(0, 0, W, H);
 
     const bootProgress = Math.min(1, elapsedSec / timings.frameBootSec);
     const breathAlpha = 0.92 + 0.08 * Math.sin(elapsedSec * 1.4);
+    const overallClass: AlertClass = liveState?.overallClass ?? 0;
+    const overallTheme = this.getAlertColors(overallClass);
 
-    // 1. Periodic sweeping curved triangulated wireframe scan mesh
+    // 1. Periodic curved wireframe visor scan sweep
     this.drawScanSweep(ctx, W, H, elapsedSec);
 
     // 2. Chamfered double-line perimeter brackets
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.strokeStyle = palette.hudCyan;
-    ctx.shadowColor = palette.hudCyanGlow;
+    ctx.strokeStyle = overallClass >= 2 ? overallTheme.stroke : HUD_CONFIG.palette.hudCyan;
+    ctx.shadowColor = overallClass >= 2 ? overallTheme.glow : HUD_CONFIG.palette.hudCyanGlow;
     ctx.shadowBlur = 7;
 
     for (const seg of HUD_CONFIG.perimeterPaths) {
@@ -90,25 +124,22 @@ export class HudCanvasRenderer {
     }
     ctx.restore();
 
-    // 3. Top-left Hex Address Telemetry Tab
-    this.drawTopLeftHexBox(ctx, W, H, nowMs, bootProgress);
+    // 3. Top-Left: Mission Day, Time, Context & SIMULATED DATA pill
+    this.drawMissionHeaderBox(ctx, W, H, elapsedSec, bootProgress, liveState);
 
-    // 4. Top-right HIGH RAD DETECTED Warning Tab
-    this.drawTopRightAlertBox(ctx, W, H, elapsedSec, bootProgress);
+    // 4. Top-Right: Ranked Active Alert ("why" line) & Active Protocol Step
+    this.drawRankedAlertBox(ctx, W, H, elapsedSec, bootProgress, liveState);
 
-    // 5. Left Dynamic 5-Bar Oscillating Histogram + Timeline Axis
-    this.drawLeftHistogram(ctx, W, H, elapsedSec);
+    // 5. Left Peripheral Telemetry: Radiation & Atmospheric Readouts
+    this.drawLeftEnvironmentalGauges(ctx, W, H, bootProgress, liveState);
 
-    // 6. Left-bottom UNIT 01 / 02 / 03 Coordinates & Numeric Telemetry Stack
-    this.drawUnitBlock(ctx, W, H, elapsedSec, bootProgress);
+    // 6. Lower-Left Peripheral Telemetry: Pressure & Cardio Context Vitals
+    this.drawLowerLeftVitalsBox(ctx, W, H, bootProgress, liveState);
 
-    // 7. Bottom-left & Bottom-right Angled Scrolling Code-Stream Panels
-    this.drawCornerStreams(ctx, W, H, elapsedSec, bootProgress);
+    // 7. Bottom-Center Assistant Caption & Voice Status Strip
+    this.drawAssistantCaptionStrip(ctx, W, H, elapsedSec, bootProgress, captionState);
 
-    // 8. Bottom-center O2 & ATM Life-Support Bars
-    this.drawVitals(ctx, W, H, elapsedSec);
-
-    // 9. Right Pitch-Driven Vertical Elevation / Altitude Tape
+    // 8. Right Pitch-Driven Vertical Elevation Tape
     this.drawAltitudeTape(ctx, W, H, elapsedSec, gazePitchNorm, bootProgress);
 
     this.texture.needsUpdate = true;
@@ -154,7 +185,9 @@ export class HudCanvasRenderer {
       for (let c = 0; c <= cols; c++) {
         const u = c / cols;
         const x = centerX + (u - 0.5) * bandW + bow;
-        const y = H * (0.04 + 0.92 * v) + Math.sin(u * Math.PI) * (v - 0.5) * (H * verticalCurveRatio);
+        const y =
+          H * (0.04 + 0.92 * v) +
+          Math.sin(u * Math.PI) * (v - 0.5) * (H * verticalCurveRatio);
         rowPts.push({ x, y });
       }
       pts.push(rowPts);
@@ -210,403 +243,373 @@ export class HudCanvasRenderer {
     ctx.closePath();
   }
 
-  private drawTopLeftHexBox(
+  private formatClock(timeOfDaySec: number): string {
+    const minsTotal = Math.floor(timeOfDaySec / 60);
+    const hh = Math.floor(minsTotal / 60) % 24;
+    const mm = minsTotal % 60;
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+
+  private drawMissionHeaderBox(
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
-    nowMs: number,
-    bootProgress: number
+    elapsedSec: number,
+    bootProgress: number,
+    liveState: LiveState | null
   ): void {
-    const { topLeftBox, hexAddresses, timings, palette } = HUD_CONFIG;
-    const x = topLeftBox.x * W;
-    const y = topLeftBox.y * H;
-    const w = topLeftBox.w * W;
-    const h = topLeftBox.h * H;
-    const hexIndex = Math.floor(nowMs / timings.hexCycleMs) % hexAddresses.length;
+    const x = W * 0.145;
+    const y = H * 0.088;
+    const w = W * 0.255;
+    const h = H * 0.095;
+    const overallClass: AlertClass = liveState?.overallClass ?? 0;
+    const theme = this.getAlertColors(overallClass);
+    const flashMult =
+      overallClass === 1 ? 0.62 + 0.38 * Math.sin(elapsedSec * 7.5) : 1;
 
     ctx.save();
-    ctx.globalAlpha = 0.42 + 0.58 * bootProgress;
-    this.drawChamferBox(ctx, x, y, w, h, w * 0.055);
-    ctx.fillStyle = palette.hudIndigoTrack;
+    ctx.globalAlpha = (0.45 + 0.55 * bootProgress) * flashMult;
+    this.drawChamferBox(ctx, x, y, w, h, w * 0.032);
+    ctx.fillStyle = theme.fill;
     ctx.fill();
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = palette.hudCyan;
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = theme.stroke;
+    ctx.shadowColor = theme.glow;
+    ctx.shadowBlur = 8;
     ctx.stroke();
 
-    // Header gradient trapezoid
-    const headerGrad = ctx.createLinearGradient(x, y, x + w, y);
-    headerGrad.addColorStop(0, "rgba(97, 84, 255, 0.52)");
-    headerGrad.addColorStop(0.5, "rgba(138, 125, 255, 0.30)");
-    headerGrad.addColorStop(1, "rgba(97, 84, 255, 0.52)");
-    ctx.fillStyle = headerGrad;
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.06, y + 2);
-    ctx.lineTo(x + w * 0.94, y + 2);
-    ctx.lineTo(x + w * 0.90, y + h * 0.28);
-    ctx.lineTo(x + w * 0.10, y + h * 0.28);
-    ctx.closePath();
-    ctx.fill();
+    const dayStr = liveState
+      ? `SOL ${String(liveState.missionDay).padStart(3, "0")} / ${liveState.missionLengthDays}D`
+      : "SOL 001 / 180D";
+    const clockStr = liveState ? this.formatClock(liveState.timeOfDaySec) : "08:00";
+    const ctxStr = liveState ? liveState.context.activity.toUpperCase() : "CABIN";
+    const statusLabel =
+      overallClass === 1
+        ? "CLASS 1 EMERGENCY"
+        : overallClass === 2
+          ? "CLASS 2 WARNING"
+          : overallClass === 3
+            ? "CLASS 3 ADVISORY"
+            : "NOMINAL";
 
-    // Animated bottom indigo progress pulse bar
-    const fillRatio = 0.35 + 0.5 * ((hexIndex % 5) / 4);
-    ctx.fillStyle = palette.hudIndigo;
-    ctx.fillRect(x + w * 0.10, y + h * 0.80, (w * 0.80) * fillRatio, h * 0.09);
-
-    ctx.fillStyle = palette.hudTextWhite;
-    ctx.font = `700 ${Math.round(H * topLeftBox.fontSizeRatio)}px ui-monospace, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
     ctx.shadowBlur = 0;
-    ctx.fillText(hexAddresses[hexIndex], x + w * 0.5, y + h * 0.63);
-    ctx.restore();
-  }
-
-  private drawTopRightAlertBox(
-    ctx: CanvasRenderingContext2D,
-    W: number,
-    H: number,
-    elapsedSec: number,
-    bootProgress: number
-  ): void {
-    const { topRightAlert, timings, palette } = HUD_CONFIG;
-    const x = topRightAlert.x * W;
-    const y = topRightAlert.y * H;
-    const w = topRightAlert.w * W;
-    const h = topRightAlert.h * H;
-
-    const radActive = elapsedSec >= timings.radAlertDelaySec;
-    const pulse = radActive
-      ? 0.60 + 0.40 * (0.5 + 0.5 * Math.sin(elapsedSec * timings.radPulseFreqHz * Math.PI * 2))
-      : 0;
-
-    ctx.save();
-    ctx.globalAlpha = 0.42 + 0.58 * bootProgress;
-    this.drawChamferBox(ctx, x, y, w, h, w * 0.055);
-    ctx.fillStyle = palette.hudIndigoTrack;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = radActive ? palette.hudAlertRed : palette.hudCyan;
-    ctx.stroke();
-
-    // Bottom anchor trim
-    ctx.fillStyle = palette.hudIndigoLight;
-    ctx.globalAlpha *= 0.72;
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.08, y + h * 0.87);
-    ctx.lineTo(x + w * 0.92, y + h * 0.87);
-    ctx.lineTo(x + w * 0.95, y + h * 0.97);
-    ctx.lineTo(x + w * 0.05, y + h * 0.97);
-    ctx.closePath();
-    ctx.fill();
-
-    if (radActive) {
-      ctx.globalAlpha = pulse;
-      ctx.fillStyle = palette.hudAlertRed;
-      ctx.shadowColor = palette.hudAlertGlow;
-      ctx.shadowBlur = 2;
-      ctx.font = `800 ${Math.round(H * topRightAlert.fontSizeRatio)}px ui-monospace, monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(topRightAlert.line1, x + w * 0.5, y + h * 0.36);
-      ctx.fillText(topRightAlert.line2, x + w * 0.5, y + h * 0.65);
-    }
-    ctx.restore();
-  }
-
-  private drawLeftHistogram(
-    ctx: CanvasRenderingContext2D,
-    W: number,
-    H: number,
-    elapsedSec: number
-  ): void {
-    const { leftBars, timings, palette } = HUD_CONFIG;
-    const ox = leftBars.originX * W;
-    const oy = leftBars.originY * H;
-    const barH = leftBars.barHeight * H;
-    const barGap = leftBars.barGap * H;
-    const maxW = leftBars.maxBarWidth * W;
-    const axisX = W * 0.046;
-    const barStartX = W * 0.050;
-    const axisBottomY = leftBars.rows.length * barGap + H * 0.012;
-
-    const barRamp = Math.min(1, Math.max(0, (elapsedSec - 0.25) / timings.barsRiseDurationSec));
-
-    ctx.save();
-    ctx.translate(ox, oy);
-
-    // Axis L-frame
-    ctx.strokeStyle = palette.hudCyan;
-    ctx.globalAlpha = 0.65;
-    ctx.lineWidth = 1.25;
-    ctx.beginPath();
-    ctx.moveTo(axisX, -H * 0.012);
-    ctx.lineTo(axisX, axisBottomY);
-    ctx.lineTo(barStartX + maxW + W * 0.01, axisBottomY);
-    ctx.stroke();
-
-    const barGrad = ctx.createLinearGradient(barStartX, 0, barStartX + maxW, 0);
-    barGrad.addColorStop(0, palette.hudIndigo);
-    barGrad.addColorStop(0.74, palette.hudIndigoLight);
-    barGrad.addColorStop(1, palette.hudCyanBright);
-
-    const trackGrad = ctx.createLinearGradient(barStartX, 0, barStartX + maxW, 0);
-    trackGrad.addColorStop(0, "rgba(97, 84, 255, 0.34)");
-    trackGrad.addColorStop(1, "rgba(97, 84, 255, 0.06)");
-
-    ctx.font = `700 ${Math.round(H * leftBars.labelFontRatio)}px ui-monospace, monospace`;
     ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillStyle = theme.text;
+    ctx.font = `700 ${Math.round(H * 0.017)}px "DM Mono", ui-monospace, monospace`;
+    ctx.fillText(`${dayStr}  ·  ${clockStr}  ·  ${ctxStr}`, x + w * 0.045, y + h * 0.34);
 
-    leftBars.rows.forEach((row, idx) => {
-      const liveVal =
-        row.basePct + row.ampPct * Math.sin(elapsedSec * row.freq * Math.PI + row.phase);
-      const pct = Math.max(8, Math.min(96, liveVal * barRamp));
-      const y = idx * barGap;
-      const bw = Math.max(2, (pct / 100) * maxW);
+    // Sub-row: SIMULATED DATA badge + status
+    ctx.fillStyle = HUD_CONFIG.palette.hudCyanBright;
+    ctx.font = `700 ${Math.round(H * 0.0135)}px "DM Mono", ui-monospace, monospace`;
+    ctx.fillText("SIMULATED DATA", x + w * 0.045, y + h * 0.72);
 
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = palette.hudTextWhite;
-      ctx.textAlign = "right";
-      ctx.shadowBlur = 0;
-      ctx.fillText(`${pct.toFixed(1)} %`, axisX - W * 0.005, y + barH * 0.55);
-
-      ctx.fillStyle = trackGrad;
-      ctx.fillRect(barStartX, y, maxW, barH);
-
-      ctx.shadowColor = palette.hudCyanGlow;
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = barGrad;
-      ctx.fillRect(barStartX, y, bw, barH);
-    });
-
-    // Timeline year ticks
-    ctx.shadowBlur = 0;
-    ctx.font = `600 ${Math.round(H * leftBars.yearFontRatio)}px ui-monospace, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    leftBars.axisYears.forEach((yr, idx) => {
-      const tx = barStartX + W * 0.012 + idx * (maxW * 0.22);
-      ctx.strokeStyle = palette.hudCyan;
-      ctx.globalAlpha = 0.65;
-      ctx.beginPath();
-      ctx.moveTo(tx, axisBottomY);
-      ctx.lineTo(tx, axisBottomY + H * 0.006);
-      ctx.stroke();
-
-      ctx.fillStyle = palette.hudTextWhite;
-      ctx.globalAlpha = 0.85;
-      ctx.fillText(yr, tx, axisBottomY + H * 0.009);
-    });
-
+    ctx.textAlign = "right";
+    ctx.fillStyle = overallClass === 0 ? "#8de8ff" : theme.stroke;
+    ctx.fillText(statusLabel, x + w * 0.955, y + h * 0.72);
     ctx.restore();
   }
 
-  private drawUnitBlock(
+  private drawRankedAlertBox(
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
     elapsedSec: number,
-    bootProgress: number
+    bootProgress: number,
+    liveState: LiveState | null
   ): void {
-    const { unitBlock, palette } = HUD_CONFIG;
-    const x = unitBlock.x * W;
-    const y = unitBlock.y * H;
+    const x = W * 0.565;
+    const y = H * 0.088;
+    const w = W * 0.295;
+    const primary = liveState?.rankedPrimaryAlert ?? null;
+    const protocol = liveState?.activeProtocol;
+    const alertClass: AlertClass = primary?.class ?? 0;
+    const theme = this.getAlertColors(alertClass);
+    const h = primary ? H * 0.128 : H * 0.072;
+    const pulse =
+      alertClass === 1
+        ? 0.52 + 0.48 * Math.sin(elapsedSec * 9.0)
+        : alertClass === 2
+          ? 0.78 + 0.22 * Math.sin(elapsedSec * 4.5)
+          : 1;
 
     ctx.save();
-    ctx.translate(x, y);
-    ctx.globalAlpha = 0.35 + 0.65 * bootProgress;
-
-    // Slanted diagonal hash header
-    ctx.strokeStyle = palette.hudIndigoLight;
-    ctx.lineWidth = 2.0;
-    const hashStep = unitBlock.hashSpacing * W;
-    ctx.beginPath();
-    for (let i = 0; i < unitBlock.hashCount; i++) {
-      const sx = i * hashStep;
-      ctx.moveTo(sx, H * 0.012);
-      ctx.lineTo(sx + W * 0.0045, 0);
-    }
+    ctx.globalAlpha = (0.45 + 0.55 * bootProgress) * pulse;
+    this.drawChamferBox(ctx, x, y, w, h, w * 0.028);
+    ctx.fillStyle = theme.fill;
+    ctx.fill();
+    ctx.lineWidth = alertClass >= 2 ? 2.1 : 1.4;
+    ctx.strokeStyle = theme.stroke;
+    ctx.shadowColor = theme.glow;
+    ctx.shadowBlur = alertClass >= 2 ? 12 : 6;
     ctx.stroke();
 
-    ctx.strokeStyle = palette.hudCyan;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(0, H * 0.016);
-    ctx.lineTo(W * 0.145, H * 0.016);
-    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
 
-    const unitFontPx = Math.round(H * unitBlock.unitFontRatio);
-    const coordFontPx = Math.round(H * unitBlock.coordFontRatio);
-    const footerFontPx = Math.round(H * unitBlock.footerFontRatio);
-
-    unitBlock.units.forEach((name, idx) => {
-      const ry = H * (0.036 + idx * 0.023);
-      const uOsc = unitBlock.unitOscillators[idx];
-      const a = (uOsc.baseA + Math.sin(elapsedSec * uOsc.freqA) * uOsc.ampA).toFixed(2);
-      const b = (uOsc.baseB + Math.cos(elapsedSec * uOsc.freqB) * uOsc.ampB).toFixed(2);
-      const c = (uOsc.baseC + Math.sin(elapsedSec * uOsc.freqC) * uOsc.ampC).toFixed(2);
-
-      ctx.fillStyle = palette.hudTextWhite;
-      ctx.font = `800 ${unitFontPx}px ui-monospace, monospace`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
-      ctx.fillText(name, W * 0.002, ry);
-
-      ctx.fillStyle = palette.hudTextDim;
-      ctx.font = `600 ${coordFontPx}px ui-monospace, monospace`;
-      ctx.fillText(`${a}/${b}/${c}`, W * 0.056, ry - H * 0.002);
-
-      ctx.strokeStyle = "rgba(150, 194, 255, 0.28)";
-      ctx.lineWidth = 0.9;
-      ctx.beginPath();
-      ctx.moveTo(W * 0.056, ry + H * 0.003);
-      ctx.lineTo(W * 0.142, ry + H * 0.003);
-      ctx.stroke();
-    });
-
-    // Micro numeric stack underneath
-    ctx.fillStyle = palette.hudTextDim;
-    ctx.font = `600 ${footerFontPx}px ui-monospace, monospace`;
-    unitBlock.footerOscillators.forEach((f, idx) => {
-      const wave =
-        f.mode === "cos"
-          ? Math.cos(elapsedSec * f.freq)
-          : f.mode === "abssin"
-            ? Math.abs(Math.sin(elapsedSec * f.freq))
-            : Math.sin(elapsedSec * f.freq);
-      const val = (f.base + wave * f.amp).toFixed(f.decimals);
-      ctx.fillText(val, W * 0.020, H * (0.105 + idx * 0.012));
-    });
-
-    ctx.restore();
-  }
-
-  private drawCornerStreams(
-    ctx: CanvasRenderingContext2D,
-    W: number,
-    H: number,
-    elapsedSec: number,
-    bootProgress: number
-  ): void {
-    const { cornerStreams, timings, palette } = HUD_CONFIG;
-    const cycleH = cornerStreams.cycleHeightRatio * H;
-    const stepY = cornerStreams.lineStepRatio * H;
-    const lineH = cornerStreams.lineHeightRatio * H;
-    const scrollBase = elapsedSec * timings.codeScrollSpeedPxPerSec;
-
-    [cornerStreams.left, cornerStreams.right].forEach((box, idx) => {
-      const x = box.x * W;
-      const y = box.y * H;
-      const w = box.w * W;
-      const h = box.h * H;
-      const scroll = ((scrollBase * (idx === 0 ? 1 : 1.15)) % cycleH);
-
-      ctx.save();
-      ctx.globalAlpha = 0.38 + 0.62 * bootProgress;
-      this.drawChamferBox(ctx, x, y, w, h, w * 0.06);
-      ctx.fillStyle = palette.cornerStreamFill;
-      ctx.fill();
-      ctx.strokeStyle = palette.hudCyan;
-      ctx.lineWidth = 1.3;
-      ctx.stroke();
-
-      ctx.clip();
-      const padX = w * 0.09;
-      for (let dup = 0; dup < 2; dup++) {
-        this.streamLines.forEach((ln, lIdx) => {
-          const ly = y + H * 0.015 + dup * cycleH + lIdx * stepY - scroll;
-          const lw = Math.min(w - padX * 2 - ln.indentRatio * w, ln.wRatio * w);
-          if (lw <= 2) return;
-          ctx.fillStyle = ln.bright ? palette.hudTextWhite : palette.hudCyan;
-          ctx.globalAlpha = ln.bright ? 0.78 : 0.42;
-          ctx.fillRect(x + padX + ln.indentRatio * w, ly, lw, lineH);
-        });
-      }
+    if (!primary) {
+      ctx.fillStyle = HUD_CONFIG.palette.hudCyanBright;
+      ctx.font = `700 ${Math.round(H * 0.0155)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText("SYSTEM WATCH · NO ACTIVE ALERTS", x + w * 0.045, y + h * 0.5);
       ctx.restore();
-    });
+      return;
+    }
+
+    // Line 1: Class badge & title
+    ctx.fillStyle = theme.stroke;
+    ctx.font = `800 ${Math.round(H * 0.0165)}px "DM Mono", ui-monospace, monospace`;
+    ctx.fillText(`CLASS ${primary.class} · ${primary.title}`, x + w * 0.045, y + h * 0.24);
+
+    // Line 2: Mandatory "why" evidence line (SIM-HUD-004)
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `600 ${Math.round(H * 0.0145)}px "Public Sans", sans-serif`;
+    const whyText = this.truncateText(ctx, primary.whyLine, w * 0.90);
+    ctx.fillText(whyText, x + w * 0.045, y + h * 0.54);
+
+    // Line 3: Protocol step prompt or top suggested action
+    ctx.fillStyle = theme.text;
+    ctx.font = `600 ${Math.round(H * 0.0135)}px "DM Mono", ui-monospace, monospace`;
+    const actionLine =
+      protocol && !protocol.completed
+        ? `STEP ${protocol.currentStepIndex + 1}/${protocol.totalSteps}: ${protocol.currentStep.instruction}`
+        : primary.suggestedActions[0] ?? "Acknowledge and monitor";
+    ctx.fillText(this.truncateText(ctx, actionLine, w * 0.90), x + w * 0.045, y + h * 0.81);
+    ctx.restore();
   }
 
-  private drawVitals(
+  private drawLeftEnvironmentalGauges(
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
-    elapsedSec: number
+    bootProgress: number,
+    liveState: LiveState | null
   ): void {
-    const { vitals, timings, palette } = HUD_CONFIG;
-    const x = vitals.x * W;
-    const y = vitals.y * H;
-    const barW = vitals.barWidth * W;
-    const barH = vitals.barHeight * H;
-    const rowGap = vitals.rowGap * H;
+    const startX = W * 0.135;
+    const startY = H * 0.255;
+    const cardW = W * 0.165;
+    const rowH = H * 0.064;
+    const gap = H * 0.012;
 
-    const ramp = Math.min(1, Math.max(0, (elapsedSec - 0.15) / timings.vitalsRampDurationSec));
-    const o2Val = Math.max(
-      0,
-      (vitals.o2.base + vitals.o2.amp * Math.sin(elapsedSec * vitals.o2.freq * Math.PI)) * ramp
-    );
-    const atmVal = Math.max(
-      0,
-      (vitals.atm.base + vitals.atm.amp * Math.cos(elapsedSec * vitals.atm.freq * Math.PI)) * ramp
-    );
+    const doseRate = liveState?.indicators.dose_rate;
+    const doseCum = liveState?.indicators.dose_cumulative;
+    const ppco2 = liveState?.indicators.ppco2;
+    const pio2 = liveState?.indicators.pio2;
 
-    const o2Ratio = Math.min(1, o2Val / vitals.o2.max);
-    const atmRatio = Math.min(1, atmVal / vitals.atm.max);
-
-    const barGrad = ctx.createLinearGradient(x, 0, x + barW, 0);
-    barGrad.addColorStop(0, palette.hudIndigo);
-    barGrad.addColorStop(0.72, palette.hudIndigoLight);
-    barGrad.addColorStop(1, palette.hudCyanBright);
-
-    const trackGrad = ctx.createLinearGradient(x, 0, x + barW, 0);
-    trackGrad.addColorStop(0, "rgba(97, 84, 255, 0.34)");
-    trackGrad.addColorStop(1, "rgba(97, 84, 255, 0.06)");
-
-    const labelPx = Math.round(H * vitals.labelFontRatio);
-    const valPx = Math.round(H * vitals.valueFontRatio);
+    const rows: Array<{
+      label: string;
+      valStr: string;
+      subStr: string;
+      ratio: number;
+      alertClass: AlertClass;
+    }> = [
+      {
+        label: "DOSE RATE",
+        valStr: `${(doseRate?.value ?? 0.6).toFixed(2)} mSv/d`,
+        subStr: "REF 0.90 GCR",
+        ratio: Math.min(1, (doseRate?.value ?? 0.6) / 3.0),
+        alertClass: doseRate?.alertClass ?? 0,
+      },
+      {
+        label: "CAREER DOSE",
+        valStr: `${(liveState?.careerDosePercent ?? 25).toFixed(1)}%`,
+        subStr: `${(doseCum?.value ?? 150).toFixed(1)} / 600 mSv`,
+        ratio: Math.min(1, (liveState?.careerDosePercent ?? 25) / 100),
+        alertClass: doseCum?.alertClass ?? 0,
+      },
+      {
+        label: "ppCO₂",
+        valStr: `${(ppco2?.value ?? 1.5).toFixed(2)} mmHg`,
+        subStr: "1H LIMIT 3.0",
+        ratio: Math.min(1, (ppco2?.value ?? 1.5) / 4.0),
+        alertClass: ppco2?.alertClass ?? 0,
+      },
+      {
+        label: "PIO₂",
+        valStr: `${Math.round(pio2?.value ?? 150)} mmHg`,
+        subStr: "TARGET 145–155",
+        ratio: Math.min(1, (pio2?.value ?? 150) / 180),
+        alertClass: pio2?.alertClass ?? 0,
+      },
+    ];
 
     ctx.save();
+    ctx.globalAlpha = 0.4 + 0.6 * bootProgress;
+    rows.forEach((row, idx) => {
+      const y = startY + idx * (rowH + gap);
+      const theme = this.getAlertColors(row.alertClass);
+
+      this.drawChamferBox(ctx, startX, y, cardW, rowH, 7);
+      ctx.fillStyle = row.alertClass > 0 ? theme.fill : "rgba(6, 20, 46, 0.44)";
+      ctx.fill();
+      ctx.lineWidth = row.alertClass > 0 ? 1.8 : 1.1;
+      ctx.strokeStyle = theme.stroke;
+      ctx.stroke();
+
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#b9e6ff";
+      ctx.font = `700 ${Math.round(H * 0.0125)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText(row.label, startX + cardW * 0.06, y + rowH * 0.28);
+
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${Math.round(H * 0.0165)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText(row.valStr, startX + cardW * 0.94, y + rowH * 0.30);
+
+      // Bar gauge
+      const barX = startX + cardW * 0.06;
+      const barY = y + rowH * 0.56;
+      const barW = cardW * 0.88;
+      const barH = Math.max(4, H * 0.0055);
+      ctx.fillStyle = "rgba(150, 194, 255, 0.16)";
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.fillStyle = row.alertClass > 0 ? theme.stroke : "#2ef2ff";
+      ctx.fillRect(barX, barY, Math.max(3, barW * row.ratio), barH);
+
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(200, 232, 255, 0.72)";
+      ctx.font = `600 ${Math.round(H * 0.011)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText(row.subStr, startX + cardW * 0.06, y + rowH * 0.83);
+    });
+    ctx.restore();
+  }
+
+  private drawLowerLeftVitalsBox(
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    bootProgress: number,
+    liveState: LiveState | null
+  ): void {
+    const x = W * 0.135;
+    const y = H * 0.625;
+    const w = W * 0.165;
+    const h = H * 0.168;
+
+    const isEva = liveState?.context.activity === "eva";
+    const pressInd = isEva
+      ? liveState?.indicators.suit_pressure
+      : liveState?.indicators.cabin_pressure;
+    const hrInd = liveState?.indicators.heart_rate;
+    const hrvInd = liveState?.indicators.hrv_rmssd;
+    const respInd = liveState?.indicators.respiration_rate;
+
+    const maxClass = Math.max(
+      pressInd?.alertClass ?? 0,
+      hrInd?.alertClass ?? 0,
+      hrvInd?.alertClass ?? 0
+    ) as AlertClass;
+    const theme = this.getAlertColors(maxClass);
+
+    ctx.save();
+    ctx.globalAlpha = 0.4 + 0.6 * bootProgress;
+    this.drawChamferBox(ctx, x, y, w, h, 8);
+    ctx.fillStyle = maxClass > 0 ? theme.fill : "rgba(6, 20, 46, 0.44)";
+    ctx.fill();
+    ctx.lineWidth = maxClass > 0 ? 1.8 : 1.1;
+    ctx.strokeStyle = theme.stroke;
+    ctx.stroke();
+
+    const lines: Array<{ k: string; v: string; cls: AlertClass }> = [
+      {
+        k: isEva ? "SUIT PRESS" : "CABIN PRESS",
+        v: `${(pressInd?.value ?? (isEva ? 43.0 : 70.0)).toFixed(1)} kPa`,
+        cls: pressInd?.alertClass ?? 0,
+      },
+      {
+        k: "HEART RATE",
+        v: `${Math.round(hrInd?.value ?? 62)} bpm`,
+        cls: hrInd?.alertClass ?? 0,
+      },
+      {
+        k: "HRV (RMSSD)",
+        v: `${Math.round(hrvInd?.value ?? 55)} ms`,
+        cls: hrvInd?.alertClass ?? 0,
+      },
+      {
+        k: "RESPIRATION",
+        v: `${Math.round(respInd?.value ?? 14)} br/m`,
+        cls: respInd?.alertClass ?? 0,
+      },
+    ];
+
     ctx.textBaseline = "middle";
+    lines.forEach((line, i) => {
+      const ly = y + h * (0.17 + i * 0.22);
+      const tLine = this.getAlertColors(line.cls);
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#96c2ff";
+      ctx.font = `700 ${Math.round(H * 0.0125)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText(line.k, x + w * 0.06, ly);
 
-    // O2 Row
-    ctx.fillStyle = palette.hudTextWhite;
-    ctx.textAlign = "right";
-    ctx.font = `800 ${labelPx}px ui-monospace, monospace`;
-    ctx.fillText(vitals.o2.label, x - W * 0.022, y + barH * 0.45);
-    ctx.font = `800 ${Math.round(labelPx * 0.64)}px ui-monospace, monospace`;
-    ctx.fillText(vitals.o2.sub, x - W * 0.015, y + barH * 0.72);
+      ctx.textAlign = "right";
+      ctx.fillStyle = line.cls > 0 ? tLine.stroke : "#ffffff";
+      ctx.font = `700 ${Math.round(H * 0.0155)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText(line.v, x + w * 0.94, ly);
+    });
+    ctx.restore();
+  }
 
-    ctx.fillStyle = trackGrad;
-    ctx.fillRect(x, y, barW, barH);
-    ctx.shadowColor = palette.hudCyanGlow;
-    ctx.shadowBlur = 7;
-    ctx.fillStyle = barGrad;
-    ctx.fillRect(x, y, Math.max(3, barW * o2Ratio), barH);
+  private drawAssistantCaptionStrip(
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    elapsedSec: number,
+    bootProgress: number,
+    captionState: AssistantCaptionState | null
+  ): void {
+    const x = W * 0.32;
+    const y = H * 0.805;
+    const w = W * 0.43;
+    const h = H * 0.088;
 
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = palette.hudTextWhite;
+    const voiceOn = captionState?.voiceConnected ?? false;
+    const listening = captionState?.isListening ?? false;
+    const busy = captionState?.isBusy ?? false;
+    const captionText =
+      captionState?.text ||
+      "Assistant standing by (voice off). Ask via panel or toggle Voice Ready.";
+
+    const borderColor = listening
+      ? "#02bfe7"
+      : (captionState?.alertClass ?? 0) >= 2
+        ? "#ff4828"
+        : HUD_CONFIG.palette.hudCyan;
+
+    ctx.save();
+    ctx.globalAlpha = 0.45 + 0.55 * bootProgress;
+    this.drawChamferBox(ctx, x, y, w, h, 8);
+    ctx.fillStyle = "rgba(6, 20, 46, 0.54)";
+    ctx.fill();
+    ctx.lineWidth = listening ? 2.0 : 1.2;
+    ctx.strokeStyle = borderColor;
+    ctx.stroke();
+
+    ctx.textBaseline = "middle";
     ctx.textAlign = "left";
-    ctx.font = `700 ${valPx}px ui-monospace, monospace`;
-    ctx.fillText(`${o2Val.toFixed(3)} ${vitals.o2.unit}`, x + barW * 0.21, y + barH * 0.54);
+    const statusDot = listening
+      ? `LISTENING${".".repeat((Math.floor(elapsedSec * 3) % 3) + 1)}`
+      : busy
+        ? "THINKING..."
+        : voiceOn
+          ? "VOICE CONNECTED · LIVE"
+          : "VOICE STANDBY · TEXT/ON-DEMAND";
 
-    // ATM Row
-    const y2 = y + rowGap;
-    ctx.shadowBlur = 0;
-    ctx.textAlign = "right";
-    ctx.font = `800 ${labelPx}px ui-monospace, monospace`;
-    ctx.fillText(vitals.atm.label, x - W * 0.015, y2 + barH * 0.54);
+    ctx.fillStyle = listening ? "#02bfe7" : "#96c2ff";
+    ctx.font = `700 ${Math.round(H * 0.012)}px "DM Mono", ui-monospace, monospace`;
+    ctx.fillText(
+      `CREW ASSISTANT (${captionState?.speaker ?? "ASSISTANT"}) · ${statusDot}`,
+      x + w * 0.035,
+      y + h * 0.25
+    );
 
-    ctx.fillStyle = trackGrad;
-    ctx.fillRect(x, y2, barW, barH);
-    ctx.shadowColor = palette.hudCyanGlow;
-    ctx.shadowBlur = 4;
-    ctx.fillStyle = barGrad;
-    ctx.fillRect(x, y2, Math.max(3, barW * atmRatio), barH);
-
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = palette.hudTextWhite;
-    ctx.textAlign = "left";
-    ctx.font = `700 ${valPx}px ui-monospace, monospace`;
-    ctx.fillText(`${atmVal.toFixed(1)} ${vitals.atm.unit}`, x + barW * 0.31, y2 + barH * 0.54);
-
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `500 ${Math.round(H * 0.0145)}px "Public Sans", sans-serif`;
+    const wrapped = this.wrapText(ctx, captionText, w * 0.93, 2);
+    wrapped.forEach((line, idx) => {
+      ctx.fillText(line, x + w * 0.035, y + h * (0.55 + idx * 0.26));
+    });
     ctx.restore();
   }
 
@@ -638,7 +641,6 @@ export class HudCanvasRenderer {
     ctx.lineTo(x, bottomY);
     ctx.stroke();
 
-    // Clip tick scroll region cleanly
     ctx.save();
     ctx.beginPath();
     ctx.rect(x - W * 0.06, topY, W * 0.08, span);
@@ -646,7 +648,7 @@ export class HudCanvasRenderer {
 
     const step = span / altitudeTape.tickCount;
     const fontPx = Math.round(H * altitudeTape.tickLabelFontRatio);
-    ctx.font = `600 ${fontPx}px ui-monospace, monospace`;
+    ctx.font = `600 ${fontPx}px "DM Mono", ui-monospace, monospace`;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
 
@@ -675,7 +677,6 @@ export class HudCanvasRenderer {
     }
     ctx.restore();
 
-    // Pointer triangle on right side of ruler
     const ptr = W * 0.006;
     ctx.fillStyle = palette.hudTextWhite;
     ctx.beginPath();
@@ -686,6 +687,47 @@ export class HudCanvasRenderer {
     ctx.fill();
 
     ctx.restore();
+  }
+
+  private truncateText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number
+  ): string {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let trimmed = text;
+    while (trimmed.length > 4 && ctx.measureText(`${trimmed}…`).width > maxWidth) {
+      trimmed = trimmed.slice(0, -1);
+    }
+    return `${trimmed}…`;
+  }
+
+  private wrapText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number,
+    maxLines: number
+  ): string[] {
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = "";
+
+    for (const w of words) {
+      const next = current ? `${current} ${w}` : w;
+      if (ctx.measureText(next).width <= maxWidth) {
+        current = next;
+      } else {
+        if (current) lines.push(current);
+        current = w;
+        if (lines.length >= maxLines - 1) {
+          break;
+        }
+      }
+    }
+    if (current && lines.length < maxLines) {
+      lines.push(this.truncateText(ctx, current, maxWidth));
+    }
+    return lines;
   }
 
   public dispose(): void {

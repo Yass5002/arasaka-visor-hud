@@ -1,0 +1,10 @@
+name = "arasaka-health-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+
+[vars]
+AZURE_OPENAI_ENDPOINT = "https://mehro-resource.openai.azure.com"
+AZURE_OPENAI_DEPLOYMENT = "gpt-5-4-mini"
+AZURE_OPENAI_API_VERSION = "2025-01-01-preview"
+AZURE_SPEECH_REGION = "switzerlandnorth"
+ALLOWED_ORIGINS = "https://nasa.yssn.tech,http://localhost:5173,http://127.0.0.1:5173"
