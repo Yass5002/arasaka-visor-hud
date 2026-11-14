@@ -1,0 +1,55 @@
+:root {
+  --status-cyan: #00e5ff;
+  --status-amber: #ffb300;
+  --status-red: #ff3b3b;
+  --void-bg: #03060a;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--void-bg);
+  color: #d8f4ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.visor-stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse 78% 72% at 50% 48%,
+    #0a1018 0%,
+    #05080d 62%,
+    #020407 100%
+  );
+}
+
+.visor-frame-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.visor-frame-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
