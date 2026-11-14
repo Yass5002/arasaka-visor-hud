@@ -287,6 +287,16 @@ export function buildHelmetGroup(textures: HelmetTextures): {
     color: 0x44dd88,
   });
 
+  const opticalGlassMat = new THREE.MeshStandardMaterial({
+    color: 0x0c1a2e,
+    roughness: 0.08,
+    metalness: 0.35,
+  });
+
+  const projectorLedMat = new THREE.MeshBasicMaterial({
+    color: 0x66aaff,
+  });
+
   disposables.push(
     shellMat,
     gasketMat,
@@ -301,7 +311,9 @@ export function buildHelmetGroup(textures: HelmetTextures): {
     grilleMat,
     fastenerMat,
     valveMat,
-    ledMat
+    ledMat,
+    opticalGlassMat,
+    projectorLedMat
   );
 
   // 1. Outer Helmet Cavity Tunnel
@@ -623,6 +635,107 @@ export function buildHelmetGroup(textures: HelmetTextures): {
     ledGeo,
     pttGeo,
     coilGeo
+  );
+
+  // =========================================================================
+  // 7. UPPER BROW COWLING, FOREHEAD CUSHION, HUD PROJECTOR & RIM FASTENERS
+  // =========================================================================
+  const browGroup = new THREE.Group();
+
+  const cowlingShape = buildRoundedRectShape(0.24, 0.026, 0.008);
+  const cowlingGeo = new THREE.ExtrudeGeometry(cowlingShape, {
+    depth: 0.036,
+    bevelEnabled: true,
+    bevelThickness: 0.003,
+    bevelSize: 0.003,
+    bevelSegments: 2,
+  });
+  cowlingGeo.center();
+  const cowlingMesh = new THREE.Mesh(cowlingGeo, cheekMat);
+  cowlingMesh.position.set(0, 0.132, -0.248);
+  cowlingMesh.rotation.x = 0.24;
+  browGroup.add(cowlingMesh);
+
+  const browPadShape = buildRoundedRectShape(0.18, 0.02, 0.009);
+  const browPadGeo = new THREE.ExtrudeGeometry(browPadShape, {
+    depth: 0.028,
+    bevelEnabled: true,
+    bevelThickness: 0.005,
+    bevelSize: 0.005,
+    bevelSegments: 3,
+  });
+  browPadGeo.center();
+  const browPadMesh = new THREE.Mesh(browPadGeo, paddingMat);
+  browPadMesh.position.set(0, 0.126, -0.228);
+  browPadMesh.rotation.x = 0.22;
+  browGroup.add(browPadMesh);
+
+  const projectorGroup = new THREE.Group();
+  projectorGroup.position.set(0, 0.121, -0.248);
+  projectorGroup.rotation.x = 0.35;
+
+  const projHousingShape = buildRoundedRectShape(0.052, 0.015, 0.004);
+  const projHousingGeo = new THREE.ExtrudeGeometry(projHousingShape, {
+    depth: 0.022,
+    bevelEnabled: true,
+    bevelThickness: 0.002,
+    bevelSize: 0.002,
+    bevelSegments: 2,
+  });
+  projHousingGeo.center();
+  const projHousingMesh = new THREE.Mesh(projHousingGeo, boomBodyMat);
+  projectorGroup.add(projHousingMesh);
+
+  const projBezelShape = buildRoundedRectShape(0.044, 0.01, 0.0025);
+  const projBezelGeo = new THREE.ExtrudeGeometry(projBezelShape, {
+    depth: 0.005,
+    bevelEnabled: true,
+    bevelThickness: 0.001,
+    bevelSize: 0.001,
+    bevelSegments: 1,
+  });
+  projBezelGeo.center();
+  const projBezelMesh = new THREE.Mesh(projBezelGeo, boomRimMat);
+  projBezelMesh.position.set(0, -0.001, 0.011);
+  projectorGroup.add(projBezelMesh);
+
+  const projLensGeo = new THREE.BoxGeometry(0.036, 0.006, 0.004);
+  const projLensMesh = new THREE.Mesh(projLensGeo, opticalGlassMat);
+  projLensMesh.position.set(0, -0.001, 0.013);
+  projectorGroup.add(projLensMesh);
+
+  const projLedGeo = new THREE.SphereGeometry(0.0013, 8, 8);
+  const projLedMesh = new THREE.Mesh(projLedGeo, projectorLedMat);
+  projLedMesh.position.set(0.02, -0.001, 0.013);
+  projectorGroup.add(projLedMesh);
+
+  browGroup.add(projectorGroup);
+
+  const upperScrewGeo = new THREE.CylinderGeometry(0.0022, 0.0022, 0.0025, 6);
+  for (let i = 0; i < 9; i++) {
+    const frac = (i / 8) * 2 - 1;
+    const t = Math.PI / 2 - frac * 0.72;
+    const [sx, sy] = superellipsePoint(
+      t,
+      aperture.halfWidth * 0.96,
+      aperture.halfHeight * 0.96,
+      aperture.superellipsePower
+    );
+    const screw = new THREE.Mesh(upperScrewGeo, fastenerMat);
+    screw.position.set(sx, sy, aperture.sealZ + 0.012);
+    screw.rotation.x = Math.PI / 2 + 0.18;
+    browGroup.add(screw);
+  }
+
+  group.add(browGroup);
+  disposables.push(
+    cowlingGeo,
+    browPadGeo,
+    projHousingGeo,
+    projBezelGeo,
+    projLensGeo,
+    projLedGeo,
+    upperScrewGeo
   );
 
   // Enable shadow casting & receiving across all interior helmet geometry for realistic grounding

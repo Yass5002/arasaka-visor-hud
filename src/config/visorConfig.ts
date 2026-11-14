@@ -23,7 +23,7 @@ export const SCENE_CONFIG = {
   marsGroundBounce: {
     direction: [0.15, -0.92, -0.36] as readonly [number, number, number],
     color: "#b86b43",
-    intensity: 0.72,
+    intensity: 0.82,
   },
   /** Soft dusty Martian sky fill vs dark interior floor */
   hemisphereLight: {
@@ -35,7 +35,7 @@ export const SCENE_CONFIG = {
   cavityFill: {
     direction: [0.45, 0.18, 0.87] as readonly [number, number, number],
     color: "#7e92b5",
-    intensity: 0.34,
+    intensity: 0.44,
   },
 } as const;
 
