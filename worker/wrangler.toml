@@ -2,6 +2,10 @@ name = "arasaka-health-proxy"
 main = "src/index.ts"
 compatibility_date = "2025-03-01"
 
+routes = [
+  { pattern = "api.nasa.yssn.tech", custom_domain = true }
+]
+
 [vars]
 AZURE_OPENAI_ENDPOINT = "https://mehro-resource.openai.azure.com"
 AZURE_OPENAI_DEPLOYMENT = "gpt-5-4-mini"
