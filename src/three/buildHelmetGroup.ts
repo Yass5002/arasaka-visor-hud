@@ -163,64 +163,6 @@ function buildChinArcGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
-function buildTaperedTubeGeometry(
-  curve: THREE.Curve<THREE.Vector3>,
-  tubularSegments: number,
-  radiusStart: number,
-  radiusEnd: number,
-  radialSegments: number,
-  flattenScaleY = 0.82
-): THREE.BufferGeometry {
-  const frames = curve.computeFrenetFrames(tubularSegments, false);
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-
-  const P = new THREE.Vector3();
-  const N = new THREE.Vector3();
-  const B = new THREE.Vector3();
-  const vertex = new THREE.Vector3();
-
-  for (let i = 0; i <= tubularSegments; i++) {
-    const u = i / tubularSegments;
-    curve.getPointAt(u, P);
-    N.copy(frames.normals[i]);
-    B.copy(frames.binormals[i]);
-    const r = radiusStart + (radiusEnd - radiusStart) * u;
-
-    for (let j = 0; j <= radialSegments; j++) {
-      const v = j / radialSegments;
-      const theta = v * Math.PI * 2;
-      const sin = Math.sin(theta);
-      const cos = Math.cos(theta);
-
-      vertex.copy(P)
-        .addScaledVector(N, r * cos)
-        .addScaledVector(B, r * flattenScaleY * sin);
-      positions.push(vertex.x, vertex.y, vertex.z);
-      uvs.push(u * 4, v);
-    }
-  }
-
-  const stride = radialSegments + 1;
-  for (let i = 0; i < tubularSegments; i++) {
-    for (let j = 0; j < radialSegments; j++) {
-      const a = i * stride + j;
-      const b = (i + 1) * stride + j;
-      const c = (i + 1) * stride + (j + 1);
-      const d = i * stride + (j + 1);
-      indices.push(a, b, d);
-      indices.push(b, c, d);
-    }
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 export function buildHelmetGroup(textures: HelmetTextures): {
   group: THREE.Group;
@@ -230,7 +172,7 @@ export function buildHelmetGroup(textures: HelmetTextures): {
   group.name = "helmetInteriorGroup";
 
   const disposables: Array<{ dispose: () => void }> = [];
-  const { pbr, aperture, cheeks, chin, rightBoom, details } = HELMET_GEO_CONFIG;
+  const { pbr, aperture, cheeks, chin, details } = HELMET_GEO_CONFIG;
 
   // Materials driven by procedural PBR maps
   const shellMat = new THREE.MeshStandardMaterial({
@@ -335,6 +277,16 @@ export function buildHelmetGroup(textures: HelmetTextures): {
     metalness: pbr.metalFastenerMetalness,
   });
 
+  const valveMat = new THREE.MeshStandardMaterial({
+    color: pbr.valveColor,
+    roughness: pbr.valveRoughness,
+    metalness: pbr.valveMetalness,
+  });
+
+  const ledMat = new THREE.MeshBasicMaterial({
+    color: 0x44dd88,
+  });
+
   disposables.push(
     shellMat,
     gasketMat,
@@ -347,7 +299,9 @@ export function buildHelmetGroup(textures: HelmetTextures): {
     socketDarkMat,
     windscreenMat,
     grilleMat,
-    fastenerMat
+    fastenerMat,
+    valveMat,
+    ledMat
   );
 
   // 1. Outer Helmet Cavity Tunnel
@@ -477,6 +431,84 @@ export function buildHelmetGroup(textures: HelmetTextures): {
   group.add(new THREE.Mesh(lipGeo, gasketMat));
   disposables.push(lipGeo);
 
+  // Visor bubble perimeter mounting bolts along the lower lip curve (as seen in ref_helmet.jpg)
+  const visorScrewGeo = new THREE.CylinderGeometry(0.0022, 0.0022, 0.003, 6);
+  disposables.push(visorScrewGeo);
+  for (let i = 2; i <= 22; i += 2) {
+    const t = -halfChinAng + (i / 24) * halfChinAng * 2;
+    const x = Math.sin(t) * chin.arcRadiusX;
+    const z = chin.centerZ - (Math.cos(t) - 1) * chin.arcRadiusZ + 0.006;
+    const y = chin.centerY + chin.barThicknessY * 0.52 + (1 - Math.cos(t)) * 0.026 + 0.003;
+    const screw = new THREE.Mesh(visorScrewGeo, fastenerMat);
+    screw.position.set(x, y, z);
+    screw.rotation.x = 0.28;
+    group.add(screw);
+  }
+
+  // Central Ergonomic Chin Rest / Impact Bumper (inspired by central bracket in ref_helmet.jpg)
+  const bumperShape = buildRoundedRectShape(0.052, 0.022, 0.004);
+  const bumperGeo = new THREE.ExtrudeGeometry(bumperShape, {
+    depth: 0.016,
+    bevelEnabled: true,
+    bevelThickness: 0.0025,
+    bevelSize: 0.0025,
+    bevelSegments: 2,
+  });
+  bumperGeo.center();
+  const bumperMesh = new THREE.Mesh(bumperGeo, paddingMat);
+  bumperMesh.position.set(0, chin.centerY + 0.012, chin.centerZ + 0.022);
+  bumperMesh.rotation.x = -0.20;
+  group.add(bumperMesh);
+  disposables.push(bumperGeo);
+
+  // Dual Atmospheric / Pressure Regulator Valve Ports (inspired by prominent cylindrical ports in ref_helmet.jpg)
+  const valveBaseGeo = new THREE.CylinderGeometry(0.015, 0.016, 0.004, 24);
+  const valveBodyGeo = new THREE.CylinderGeometry(0.0125, 0.013, 0.014, 24);
+  const valveKnurlGeo = new THREE.TorusGeometry(0.013, 0.0016, 8, 24);
+  const valveCapGeo = new THREE.CylinderGeometry(0.009, 0.011, 0.004, 24);
+  const miniBoltGeo = new THREE.CylinderGeometry(0.0016, 0.0016, 0.0025, 6);
+  disposables.push(valveBaseGeo, valveBodyGeo, valveKnurlGeo, valveCapGeo, miniBoltGeo);
+
+  for (const side of [-1, 1] as const) {
+    const valveGroup = new THREE.Group();
+    // Positioned on the left and right inner chin shelf
+    const vx = side * 0.092;
+    const vy = chin.centerY + 0.006;
+    const vz = chin.centerZ + 0.004;
+    valveGroup.position.set(vx, vy, vz);
+    valveGroup.rotation.set(-0.35, -side * 0.28, side * 0.14);
+
+    // Flange base ring
+    const vBase = new THREE.Mesh(valveBaseGeo, fastenerMat);
+    valveGroup.add(vBase);
+
+    // 6 miniature perimeter flange hex bolts
+    for (let b = 0; b < 6; b++) {
+      const ang = (b / 6) * Math.PI * 2;
+      const mb = new THREE.Mesh(miniBoltGeo, fastenerMat);
+      mb.position.set(Math.cos(ang) * 0.0138, 0.0025, Math.sin(ang) * 0.0138);
+      valveGroup.add(mb);
+    }
+
+    // Cylindrical matte ceramic / titanium valve body
+    const vBody = new THREE.Mesh(valveBodyGeo, valveMat);
+    vBody.position.y = 0.008;
+    valveGroup.add(vBody);
+
+    // Knurled grip collar ring
+    const vKnurl = new THREE.Mesh(valveKnurlGeo, boomRimMat);
+    vKnurl.rotation.x = Math.PI / 2;
+    vKnurl.position.y = 0.012;
+    valveGroup.add(vKnurl);
+
+    // Beveled center cap / dial
+    const vCap = new THREE.Mesh(valveCapGeo, fastenerMat);
+    vCap.position.y = 0.016;
+    valveGroup.add(vCap);
+
+    group.add(valveGroup);
+  }
+
   // Recessed braided comms conduit cables tucking from cheek into chin cavity
   for (const side of [-1, 1] as const) {
     const cablePts = [
@@ -496,164 +528,102 @@ export function buildHelmetGroup(textures: HelmetTextures): {
     disposables.push(cableGeo);
   }
 
-  // 6. Single Right-Side Integrated Microphone Boom (Physically Anchored into Cheek/Chin Armor)
-  const pMount = new THREE.Vector3(rightBoom.mountX, rightBoom.mountY, rightBoom.mountZ);
-  const pElbow = new THREE.Vector3(rightBoom.elbowX, rightBoom.elbowY, rightBoom.elbowZ);
-  const pNeck = new THREE.Vector3(rightBoom.neckX, rightBoom.neckY, rightBoom.neckZ);
-  const pTip = new THREE.Vector3(rightBoom.tipX, rightBoom.tipY, rightBoom.tipZ);
+  // 6. Tactical Communications Radio Mic Unit (Right-Side, inspired by radio mic in ref_helmet.jpg)
+  const micGroup = new THREE.Group();
+  // Anchored on the right chin shelf, positioned ergonomically
+  micGroup.position.set(0.048, chin.centerY + 0.022, chin.centerZ + 0.024);
+  micGroup.rotation.set(-0.24, -0.35, 0.12);
 
-  const boomCurve = new THREE.CatmullRomCurve3([pMount, pElbow, pNeck, pTip]);
+  // 6a. Swivel Mount Bracket Base on Chin Shelf
+  const micBaseGeo = new THREE.CylinderGeometry(0.008, 0.009, 0.005, 18);
+  const micBase = new THREE.Mesh(micBaseGeo, fastenerMat);
+  micGroup.add(micBase);
 
-  // 6a. Recessed Mounting Escutcheon Bracket bolted into the right inner cheek housing
-  const mountGroup = new THREE.Group();
-  mountGroup.position.copy(pMount);
-  mountGroup.lookAt(pElbow);
+  const micSwivelGeo = new THREE.SphereGeometry(0.0065, 16, 12);
+  const micSwivel = new THREE.Mesh(micSwivelGeo, boomRimMat);
+  micSwivel.position.y = 0.005;
+  micGroup.add(micSwivel);
 
-  const plateShape = buildRoundedRectShape(
-    rightBoom.mountPlateWidth,
-    rightBoom.mountPlateHeight,
-    0.005
-  );
-  const plateGeo = new THREE.ExtrudeGeometry(plateShape, {
-    depth: 0.006,
+  // 6b. Sculpted Ergonomic Radio Mic Body (trapezoidal / rounded rectangular)
+  const radioShape = buildRoundedRectShape(0.024, 0.034, 0.004);
+  const radioGeo = new THREE.ExtrudeGeometry(radioShape, {
+    depth: 0.014,
     bevelEnabled: true,
-    bevelThickness: 0.0022,
-    bevelSize: 0.0022,
+    bevelThickness: 0.002,
+    bevelSize: 0.002,
     bevelSegments: 2,
   });
-  plateGeo.center();
-  const plateMesh = new THREE.Mesh(plateGeo, boomBodyMat);
-  mountGroup.add(plateMesh);
+  radioGeo.center();
+  const radioBody = new THREE.Mesh(radioGeo, boomBodyMat);
+  radioBody.position.set(0, 0.024, 0.004);
+  micGroup.add(radioBody);
 
-  // Dark recessed socket well + anodized swivel turret collar
-  const socketWellGeo = new THREE.CylinderGeometry(
-    rightBoom.mountSocketRadius,
-    rightBoom.mountSocketRadius * 1.08,
-    0.008,
-    20
-  );
-  const socketWell = new THREE.Mesh(socketWellGeo, socketDarkMat);
-  socketWell.rotation.x = Math.PI / 2;
-  socketWell.position.z = 0.0025;
-  mountGroup.add(socketWell);
-
-  const turretRingGeo = new THREE.TorusGeometry(
-    rightBoom.mountSocketRadius * 0.88,
-    0.0024,
-    10,
-    24
-  );
-  const turretRing = new THREE.Mesh(turretRingGeo, boomRimMat);
-  turretRing.position.z = 0.0055;
-  mountGroup.add(turretRing);
-
-  // Corner mounting hex bolts securing bracket to cheek wall
-  for (const bx of [-rightBoom.mountPlateWidth * 0.34, rightBoom.mountPlateWidth * 0.34]) {
-    const mBolt = new THREE.Mesh(boltGeo, fastenerMat);
-    mBolt.rotation.x = Math.PI / 2;
-    mBolt.position.set(bx, rightBoom.mountPlateHeight * 0.24, 0.0045);
-    mountGroup.add(mBolt);
-  }
-  group.add(mountGroup);
-  disposables.push(plateGeo, socketWellGeo, turretRingGeo);
-
-  // 6b. Ribbed Elastomer Strain-Relief Flex Boot exiting socket along curve
-  const ribGeo = new THREE.TorusGeometry(rightBoom.armBaseRadius * 1.18, 0.0018, 8, 18);
-  disposables.push(ribGeo);
-  for (let r = 0; r < rightBoom.flexRibCount; r++) {
-    const t = 0.03 + r * 0.038;
-    const pos = boomCurve.getPointAt(t);
-    const tangent = boomCurve.getTangentAt(t);
-    const rib = new THREE.Mesh(ribGeo, gasketMat);
-    rib.position.copy(pos);
-    rib.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
-    group.add(rib);
+  // 6c. Horizontal Acoustic Grille Slats (inspired by front slats on radio mic in ref_helmet.jpg)
+  const slatGeo = new THREE.BoxGeometry(0.016, 0.0018, 0.002);
+  for (let s = 0; s < 5; s++) {
+    const slat = new THREE.Mesh(slatGeo, grilleMat);
+    slat.position.set(0, 0.018 + s * 0.0042, 0.0115);
+    micGroup.add(slat);
   }
 
-  // 6c. Tapered Curved Boom Arm & Metallic Spine Conduit
-  const boomArmGeo = buildTaperedTubeGeometry(
-    boomCurve,
-    32,
-    rightBoom.armBaseRadius,
-    rightBoom.armTipRadius,
-    16,
-    0.84
-  );
-  const boomArmMesh = new THREE.Mesh(boomArmGeo, boomBodyMat);
-  group.add(boomArmMesh);
-  disposables.push(boomArmGeo);
+  // 6d. Top Rotary Knob / Channel Dial
+  const dialGeo = new THREE.CylinderGeometry(0.0035, 0.0035, 0.004, 16);
+  const dial = new THREE.Mesh(dialGeo, fastenerMat);
+  dial.position.set(-0.006, 0.042, 0.004);
+  micGroup.add(dial);
 
-  // Subtle stepped collar transition before microphone capsule
-  const neckCollarGeo = new THREE.CylinderGeometry(
-    rightBoom.armTipRadius * 1.16,
-    rightBoom.armTipRadius * 1.05,
-    0.008,
-    16
-  );
-  const neckCollar = new THREE.Mesh(neckCollarGeo, boomRimMat);
-  neckCollar.position.copy(boomCurve.getPointAt(0.92));
-  neckCollar.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0),
-    boomCurve.getTangentAt(0.92)
-  );
-  group.add(neckCollar);
-  disposables.push(neckCollarGeo);
+  // 6e. Status Indicator LED Dot (green nominal link)
+  const ledGeo = new THREE.CylinderGeometry(0.0012, 0.0012, 0.0015, 12);
+  const led = new THREE.Mesh(ledGeo, ledMat);
+  led.rotation.x = Math.PI / 2;
+  led.position.set(0.007, 0.036, 0.0115);
+  micGroup.add(led);
 
-  // 6d. Sculpted Acoustic Microphone Capsule Head angled toward wearer's mouth
-  const tipGroup = new THREE.Group();
-  tipGroup.position.copy(pTip);
-  tipGroup.rotation.set(
-    THREE.MathUtils.degToRad(rightBoom.capsuleTiltXDeg),
-    -THREE.MathUtils.degToRad(rightBoom.capsuleTiltYDeg),
-    0
+  // 6f. Side Push-To-Talk (PTT) Button Bar
+  const pttGeo = new THREE.BoxGeometry(0.0025, 0.016, 0.006);
+  const ptt = new THREE.Mesh(pttGeo, boomRimMat);
+  ptt.position.set(0.0135, 0.024, 0.004);
+  micGroup.add(ptt);
+
+  // 6g. Coiled Strain-Relief Comms Wire (looping from mic base into chin chassis socket)
+  const coilPts: THREE.Vector3[] = [];
+  for (let c = 0; c <= 32; c++) {
+    const t = c / 32;
+    const ang = t * Math.PI * 5;
+    const cx = Math.sin(ang) * 0.004 + t * 0.008;
+    const cy = -t * 0.014;
+    const cz = Math.cos(ang) * 0.004 - t * 0.012;
+    coilPts.push(new THREE.Vector3(cx, cy, cz));
+  }
+  const coilGeo = new THREE.TubeGeometry(
+    new THREE.CatmullRomCurve3(coilPts),
+    36,
+    0.0022,
+    8,
+    false
   );
+  const coilWire = new THREE.Mesh(coilGeo, cableMat);
+  coilWire.position.set(0, 0.006, 0);
+  micGroup.add(coilWire);
 
-  const housingGeo = new THREE.CylinderGeometry(
-    rightBoom.capsuleRadius * 0.96,
-    rightBoom.capsuleRadius * 0.82,
-    rightBoom.capsuleLength * 0.56,
-    24
+  group.add(micGroup);
+  disposables.push(
+    visorScrewGeo,
+    bumperGeo,
+    valveBaseGeo,
+    valveBodyGeo,
+    valveKnurlGeo,
+    valveCapGeo,
+    miniBoltGeo,
+    micBaseGeo,
+    micSwivelGeo,
+    radioGeo,
+    slatGeo,
+    dialGeo,
+    ledGeo,
+    pttGeo,
+    coilGeo
   );
-  const housingMesh = new THREE.Mesh(housingGeo, boomBodyMat);
-  housingMesh.rotation.x = Math.PI / 2;
-  housingMesh.position.z = -rightBoom.capsuleLength * 0.14;
-  tipGroup.add(housingMesh);
-
-  // Textured acoustic foam / dampener collar
-  const windscreenGeo = new THREE.CylinderGeometry(
-    rightBoom.capsuleRadius * 1.04,
-    rightBoom.capsuleRadius * 1.02,
-    rightBoom.capsuleLength * 0.36,
-    24
-  );
-  const windscreenMesh = new THREE.Mesh(windscreenGeo, windscreenMat);
-  windscreenMesh.rotation.x = Math.PI / 2;
-  windscreenMesh.position.z = rightBoom.capsuleLength * 0.20;
-  tipGroup.add(windscreenMesh);
-
-  const bezelGeo = new THREE.TorusGeometry(rightBoom.capsuleRadius * 0.98, 0.0014, 10, 28);
-  const bezelMesh = new THREE.Mesh(bezelGeo, boomRimMat);
-  bezelMesh.position.z = rightBoom.capsuleLength * 0.38;
-  tipGroup.add(bezelMesh);
-
-  // Hemispherical perforated steel microphone dome grille
-  const grilleDomeGeo = new THREE.SphereGeometry(
-    rightBoom.capsuleRadius * 0.94,
-    24,
-    14,
-    0,
-    Math.PI * 2,
-    0,
-    Math.PI * 0.48
-  );
-  const grilleDomeMesh = new THREE.Mesh(grilleDomeGeo, grilleMat);
-  grilleDomeMesh.rotation.x = Math.PI / 2;
-  grilleDomeMesh.scale.set(1, 0.45, 1);
-  grilleDomeMesh.position.z = rightBoom.capsuleLength * 0.38;
-  tipGroup.add(grilleDomeMesh);
-
-  group.add(tipGroup);
-  disposables.push(housingGeo, windscreenGeo, bezelGeo, grilleDomeGeo);
 
   // Enable shadow casting & receiving across all interior helmet geometry for realistic grounding
   group.traverse((obj) => {

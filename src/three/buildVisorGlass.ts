@@ -164,18 +164,18 @@ export function buildVisorGlass(hudTexture: THREE.Texture): VisorGlassHandle {
         return texture2D(uHudMap, uv);
       }
 
-      // 9-tap soft Gaussian optical focus kernel
+      // Clean optical focus kernel preserving crisp character glyphs
       vec4 sampleHudSoft(vec2 uv, float radiusTexels) {
+        if (radiusTexels <= 0.08) {
+          return sampleHudClamped(uv);
+        }
         vec2 stepUv = uTexelSize * radiusTexels;
-        vec4 sum = sampleHudClamped(uv) * 0.24;
-        sum += sampleHudClamped(uv + vec2( stepUv.x,  0.0)) * 0.12;
-        sum += sampleHudClamped(uv + vec2(-stepUv.x,  0.0)) * 0.12;
-        sum += sampleHudClamped(uv + vec2( 0.0,  stepUv.y)) * 0.12;
-        sum += sampleHudClamped(uv + vec2( 0.0, -stepUv.y)) * 0.12;
-        sum += sampleHudClamped(uv + vec2( stepUv.x,  stepUv.y)) * 0.07;
-        sum += sampleHudClamped(uv + vec2(-stepUv.x,  stepUv.y)) * 0.07;
-        sum += sampleHudClamped(uv + vec2( stepUv.x, -stepUv.y)) * 0.07;
-        sum += sampleHudClamped(uv + vec2(-stepUv.x, -stepUv.y)) * 0.07;
+        vec4 center = sampleHudClamped(uv);
+        vec4 sum = center * 0.60;
+        sum += (sampleHudClamped(uv + vec2( stepUv.x,  0.0)) +
+                sampleHudClamped(uv + vec2(-stepUv.x,  0.0)) +
+                sampleHudClamped(uv + vec2( 0.0,  stepUv.y)) +
+                sampleHudClamped(uv + vec2( 0.0, -stepUv.y))) * 0.10;
         return sum;
       }
 

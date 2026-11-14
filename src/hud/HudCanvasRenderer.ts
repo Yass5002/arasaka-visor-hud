@@ -256,8 +256,7 @@ export class HudCanvasRenderer {
     ctx.font = `700 ${Math.round(H * topLeftBox.fontSizeRatio)}px ui-monospace, monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.shadowColor = palette.hudCyanGlow;
-    ctx.shadowBlur = 5;
+    ctx.shadowBlur = 0;
     ctx.fillText(hexAddresses[hexIndex], x + w * 0.5, y + h * 0.63);
     ctx.restore();
   }
@@ -304,7 +303,7 @@ export class HudCanvasRenderer {
       ctx.globalAlpha = pulse;
       ctx.fillStyle = palette.hudAlertRed;
       ctx.shadowColor = palette.hudAlertGlow;
-      ctx.shadowBlur = 11;
+      ctx.shadowBlur = 2;
       ctx.font = `800 ${Math.round(H * topRightAlert.fontSizeRatio)}px ui-monospace, monospace`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -326,8 +325,8 @@ export class HudCanvasRenderer {
     const barH = leftBars.barHeight * H;
     const barGap = leftBars.barGap * H;
     const maxW = leftBars.maxBarWidth * W;
-    const axisX = W * 0.025;
-    const barStartX = W * 0.028;
+    const axisX = W * 0.046;
+    const barStartX = W * 0.050;
     const axisBottomY = leftBars.rows.length * barGap + H * 0.012;
 
     const barRamp = Math.min(1, Math.max(0, (elapsedSec - 0.25) / timings.barsRiseDurationSec));
@@ -582,7 +581,7 @@ export class HudCanvasRenderer {
     ctx.fillStyle = barGrad;
     ctx.fillRect(x, y, Math.max(3, barW * o2Ratio), barH);
 
-    ctx.shadowBlur = 4;
+    ctx.shadowBlur = 0;
     ctx.fillStyle = palette.hudTextWhite;
     ctx.textAlign = "left";
     ctx.font = `700 ${valPx}px ui-monospace, monospace`;
@@ -598,11 +597,11 @@ export class HudCanvasRenderer {
     ctx.fillStyle = trackGrad;
     ctx.fillRect(x, y2, barW, barH);
     ctx.shadowColor = palette.hudCyanGlow;
-    ctx.shadowBlur = 7;
+    ctx.shadowBlur = 4;
     ctx.fillStyle = barGrad;
     ctx.fillRect(x, y2, Math.max(3, barW * atmRatio), barH);
 
-    ctx.shadowBlur = 4;
+    ctx.shadowBlur = 0;
     ctx.fillStyle = palette.hudTextWhite;
     ctx.textAlign = "left";
     ctx.font = `700 ${valPx}px ui-monospace, monospace`;

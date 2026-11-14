@@ -41,7 +41,7 @@ export const SCENE_CONFIG = {
 
 export const MOTION_CONFIG = {
   /** Overscan covering shifted eye-level horizon so panorama borders never appear across look limits */
-  panoramaCoverScale: 1.92,
+  panoramaCoverScale: 2.15,
   panoramaAspect: 2400 / 1225,
   /** Angular margin kept between screen ray extremes and panorama image edge (radians) */
   edgeSafetyMarginRad: 0.012,
@@ -211,6 +211,9 @@ export const HELMET_GEO_CONFIG = {
     socketDarkColor: "#090a0d",
     windscreenColor: "#141519",
     windscreenRoughness: 0.94,
+    valveColor: "#e6e8ec",
+    valveRoughness: 0.38,
+    valveMetalness: 0.28,
     metalFastenerColor: "#7a7d86",
     metalFastenerRoughness: 0.32,
     metalFastenerMetalness: 0.84,
@@ -253,40 +256,40 @@ export const VISOR_GLASS_CONFIG = {
     vMin: 0.342,
     vMax: 0.672,
   },
-  /** Intentionally slightly lower offscreen HUD texture resolution so projected light is never crisp */
+  /** Offscreen HUD texture in crisp high-DPI resolution so text and digits are sharp and readable */
   hudTexture: {
-    width: 1152,
-    height: 648,
+    width: 2048,
+    height: 1152,
     updateFps: 30,
   },
-  /** Projected optical light & glass thickness properties (strictly additive over Mars) */
+  /** Projected optical light & glass thickness properties (naturally readable & realistically possible) */
   optics: {
     /** Overall see-through projected light intensity */
-    hudIntensity: 0.92,
-    /** Optical focus softness radius (in HUD UV texel units) */
-    softBlurRadiusTexels: 1.55,
-    /** Optical bloom halo strength & wide spread */
-    bloomStrength: 0.44,
-    bloomSpreadTexels: 5.8,
-    /** Faint ghost double image from outer/inner thick curved visor reflections */
-    ghostOffsetUv: [0.0058, -0.0046] as readonly [number, number],
-    ghostViewParallax: 0.012,
-    ghostOpacity: 0.24,
-    /** Subtle RGB chromatic aberration increasing radially toward curved glass edges */
-    chromaticEdgeStrength: 0.0044,
-    chromaticPower: 1.65,
+    hudIntensity: 1.02,
+    /** Optical focus softness radius (minimal to preserve crisp, readable character glyphs) */
+    softBlurRadiusTexels: 0.28,
+    /** Subtle optical bloom halo that doesn't flood font apertures */
+    bloomStrength: 0.18,
+    bloomSpreadTexels: 2.8,
+    /** Faint secondary ghost reflection from thick curved visor glass */
+    ghostOffsetUv: [0.0022, -0.0016] as readonly [number, number],
+    ghostViewParallax: 0.008,
+    ghostOpacity: 0.07,
+    /** Subtle RGB chromatic aberration only at the far curved glass perimeter */
+    chromaticEdgeStrength: 0.0016,
+    chromaticPower: 1.75,
     /** Very faint additive curved dome specular sheen from Martian sun & grazing Fresnel */
-    domeSpecularOpacity: 0.065,
+    domeSpecularOpacity: 0.055,
     domeSpecularColor: "#ffe4c8",
-    domeFresnelOpacity: 0.032,
+    domeFresnelOpacity: 0.028,
     domeFresnelPower: 3.4,
     domeFresnelColor: "#9dc5ff",
   },
 } as const;
 
 export const HUD_CONFIG = {
-  canvasW: 1152,
-  canvasH: 648,
+  canvasW: 2048,
+  canvasH: 1152,
   palette: {
     hudCyan: "#96c2ff",
     hudCyanBright: "#cfe4ff",
@@ -455,7 +458,7 @@ export const HUD_CONFIG = {
     y: 0.041,
     w: 0.133,
     h: 0.117,
-    fontSizeRatio: 0.0155,
+    fontSizeRatio: 0.019,
   },
   topRightAlert: {
     x: 0.597,
@@ -464,16 +467,16 @@ export const HUD_CONFIG = {
     h: 0.117,
     line1: "HIGH RAD",
     line2: "DETECTED",
-    fontSizeRatio: 0.031,
+    fontSizeRatio: 0.034,
   },
   leftBars: {
-    originX: 0.052,
+    originX: 0.068,
     originY: 0.322,
     barHeight: 0.018,
     barGap: 0.038,
-    maxBarWidth: 0.186,
-    labelFontRatio: 0.0135,
-    yearFontRatio: 0.0115,
+    maxBarWidth: 0.180,
+    labelFontRatio: 0.015,
+    yearFontRatio: 0.013,
     axisYears: ["2016", "2017", "2018", "2019", "2020"],
     rows: [
       { basePct: 72.4, ampPct: 14.5, freq: 0.42, phase: 0.0 },
@@ -488,9 +491,9 @@ export const HUD_CONFIG = {
     y: 0.688,
     hashCount: 16,
     hashSpacing: 0.0072,
-    unitFontRatio: 0.0185,
-    coordFontRatio: 0.0115,
-    footerFontRatio: 0.010,
+    unitFontRatio: 0.021,
+    coordFontRatio: 0.014,
+    footerFontRatio: 0.0125,
     units: ["UNIT 01", "UNIT 02", "UNIT 03"],
     unitOscillators: [
       { baseA: 320, baseB: 440, baseC: 510, ampA: 42, ampB: 31, ampC: 27, freqA: 1.2, freqB: 0.9, freqC: 1.5 },
@@ -512,8 +515,8 @@ export const HUD_CONFIG = {
     barWidth: 0.215,
     barHeight: 0.023,
     rowGap: 0.043,
-    labelFontRatio: 0.022,
-    valueFontRatio: 0.019,
+    labelFontRatio: 0.024,
+    valueFontRatio: 0.021,
     o2: { label: "O", sub: "2", base: 0.129, amp: 0.006, freq: 0.62, max: 0.22, unit: "%" },
     atm: { label: "ATM", base: 7.4, amp: 0.65, freq: 0.44, max: 12.0, unit: "mb" },
   },
@@ -523,7 +526,7 @@ export const HUD_CONFIG = {
     bottomY: 0.762,
     tickCount: 38,
     valueStepPerTick: 0.12,
-    tickLabelFontRatio: 0.0105,
+    tickLabelFontRatio: 0.0135,
     pitchSensitivityPxRatio: 0.095,
     idleWaveAmpPxRatio: 0.0045,
     idleWaveFreqRad: 0.8,
