@@ -1,18 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
-import {
-  DASHBOARD_CONFIG,
-  HUD_CONFIG,
-  MOTION_CONFIG,
-  PANORAMA_CONFIG,
-  SCENE_CONFIG,
-} from "../config/visorConfig";
+import { MOTION_CONFIG, PANORAMA_CONFIG, SCENE_CONFIG } from "../config/visorConfig";
 import { createHelmetTextures } from "../three/proceduralTextures";
 import { buildHelmetGroup } from "../three/buildHelmetGroup";
 import { buildVisorGlass } from "../three/buildVisorGlass";
 import { HelmetDofComposite } from "../three/HelmetDofComposite";
 import { HudCanvasRenderer } from "../hud/HudCanvasRenderer";
-import { SimEventId, SimulationControls, TelemetrySnapshot } from "../simulation/types";
 
 const NOISE_GLSL = /* glsl */ `
   float hash21(vec2 p) {
@@ -53,11 +46,6 @@ function clampSigned(v: number, maxAbs: number): number {
   return Math.max(-maxAbs, Math.min(maxAbs, v));
 }
 
-export interface VisorSceneProps {
-  simRef: React.MutableRefObject<SimulationControls>;
-  onTelemetrySample?: (sample: TelemetrySnapshot) => void;
-}
-
 /**
  * Unified real 3D perspective scene:
  * - Mars panorama (sky + depth-displaced terrain) rendered with untouched NASA brightness/colors
@@ -66,10 +54,8 @@ export interface VisorSceneProps {
  * - Projected HUD rendered onto the 3D curved dome mesh (soft blur, bloom, ghost, edge chromatic fringe)
  * - Near-eye foreground helmet parts composited with real 3D distance-based Depth-of-Field blur
  */
-export const VisorScene: React.FC<VisorSceneProps> = ({ simRef, onTelemetrySample }) => {
+export const VisorScene: React.FC = () => {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const telemetryCbRef = useRef(onTelemetrySample);
-  telemetryCbRef.current = onTelemetrySample;
 
   useEffect(() => {
     const container = mountRef.current;
@@ -345,17 +331,14 @@ export const VisorScene: React.FC<VisorSceneProps> = ({ simRef, onTelemetrySampl
       : performance.now() - MOTION_CONFIG.idleReturnDelayMs;
 
     const handlePointerMove = (e: PointerEvent) => {
-      if (!simRef.current.globalCursorTracking) return;
-      const gain = simRef.current.trackingGain;
-      const nx = ((e.clientX / (window.innerWidth || 1)) * 2 - 1) * gain;
-      const ny = ((e.clientY / (window.innerHeight || 1)) * 2 - 1) * gain;
+      const nx = (e.clientX / (window.innerWidth || 1)) * 2 - 1;
+      const ny = (e.clientY / (window.innerHeight || 1)) * 2 - 1;
       rawTargetX = clampUnit(nx);
       rawTargetY = clampUnit(ny);
       lastPointerTime = performance.now();
     };
 
     const handlePointerLeave = () => {
-      if (!simRef.current.globalCursorTracking) return;
       lastPointerTime = performance.now() - MOTION_CONFIG.idleReturnDelayMs;
     };
 
@@ -368,38 +351,15 @@ export const VisorScene: React.FC<VisorSceneProps> = ({ simRef, onTelemetrySampl
     let animId = 0;
     const startTime = performance.now();
     let prevTime = startTime;
-    let breathTime = 0;
-    let lastScanNonce = simRef.current.manualScanNonce;
-    let manualScanStartSec: number | undefined;
-    let lastTelemetryEmitMs = 0;
-    const telemetryIntervalMs = 1000 / DASHBOARD_CONFIG.telemetryUiHz;
 
     const animate = (now: number) => {
       const dt = Math.min(0.05, Math.max(0.001, (now - prevTime) / 1000));
       prevTime = now;
       const elapsedSec = (now - startTime) / 1000;
       const absElapsed = now / 1000;
-      const sim = simRef.current;
 
-      if (sim.manualScanNonce !== lastScanNonce) {
-        lastScanNonce = sim.manualScanNonce;
-        manualScanStartSec = elapsedSec;
-      }
-
-      const radActiveEvent = now < sim.radiationBurstUntilMs;
-      const leakActiveEvent = now < sim.o2LeakUntilMs;
-      const surgeActiveEvent = now < sim.pressureSurgeUntilMs;
-      const scanActiveEvent = now < sim.terrainScanUntilMs;
-
-      const effectiveExertion = sim.exertionMultiplier * (leakActiveEvent ? 1.45 : 1.0);
-      breathTime += dt * effectiveExertion;
-
-      // Return smoothly toward center when mouse is still (or tracking paused)
-      if (!sim.globalCursorTracking) {
-        const decay = Math.exp(-MOTION_CONFIG.idleReturnRate * 1.4 * dt);
-        rawTargetX *= decay;
-        rawTargetY *= decay;
-      } else if (sim.idleReturnEnabled && now - lastPointerTime > MOTION_CONFIG.idleReturnDelayMs) {
+      // Return smoothly toward center when mouse is still
+      if (now - lastPointerTime > MOTION_CONFIG.idleReturnDelayMs) {
         const decay = Math.exp(-MOTION_CONFIG.idleReturnRate * dt);
         rawTargetX *= decay;
         rawTargetY *= decay;
@@ -419,30 +379,22 @@ export const VisorScene: React.FC<VisorSceneProps> = ({ simRef, onTelemetrySampl
       eyeInputY += (pointerY - eyeInputY) * eyeAlpha;
 
       // Continuous multi-harmonic idle breathing (head & eye never stop moving)
-      const breathAmpScale = 0.8 + 0.2 * effectiveExertion;
       const hb = MOTION_CONFIG.head.breathing;
       const headBreathPitch =
-        (Math.sin(breathTime * hb.pitchFreqRad) * hb.pitchAmpRad +
-          Math.sin(breathTime * hb.pitchHarmonicFreqRad) * hb.pitchHarmonicAmpRad) *
-        breathAmpScale;
-      const headBreathYaw = Math.cos(breathTime * hb.yawFreqRad) * hb.yawAmpRad * breathAmpScale;
-      const headBreathRoll = Math.sin(breathTime * hb.rollFreqRad) * hb.rollAmpRad * breathAmpScale;
+        Math.sin(absElapsed * hb.pitchFreqRad) * hb.pitchAmpRad +
+        Math.sin(absElapsed * hb.pitchHarmonicFreqRad) * hb.pitchHarmonicAmpRad;
+      const headBreathYaw = Math.cos(absElapsed * hb.yawFreqRad) * hb.yawAmpRad;
+      const headBreathRoll = Math.sin(absElapsed * hb.rollFreqRad) * hb.rollAmpRad;
 
       const eb = MOTION_CONFIG.eye.breathing;
-      const eyeBreathYaw = Math.sin(breathTime * eb.yawFreqRad) * eb.yawAmpRad * breathAmpScale;
-      const eyeBreathPitch =
-        Math.cos(breathTime * eb.pitchFreqRad) * eb.pitchAmpRad * breathAmpScale;
-      const eyeBreathShiftX = Math.sin(breathTime * eb.shiftXFreqRad) * eb.shiftXAmp * breathAmpScale;
-      const eyeBreathShiftY = Math.cos(breathTime * eb.shiftYFreqRad) * eb.shiftYAmp * breathAmpScale;
-
-      // Subtle structural vibration during pressure surge event
-      const surgeJitterYaw = surgeActiveEvent ? Math.sin(absElapsed * 29.0) * 0.0011 : 0;
-      const surgeJitterPitch = surgeActiveEvent ? Math.cos(absElapsed * 37.0) * 0.0009 : 0;
+      const eyeBreathYaw = Math.sin(absElapsed * eb.yawFreqRad) * eb.yawAmpRad;
+      const eyeBreathPitch = Math.cos(absElapsed * eb.pitchFreqRad) * eb.pitchAmpRad;
+      const eyeBreathShiftX = Math.sin(absElapsed * eb.shiftXFreqRad) * eb.shiftXAmp;
+      const eyeBreathShiftY = Math.cos(absElapsed * eb.shiftYFreqRad) * eb.shiftYAmp;
 
       // Desired head rotation (heavy rigid body: turns helmet + curved glass + HUD together)
-      let headYaw = -headInputX * MOTION_CONFIG.head.maxYawRad + headBreathYaw + surgeJitterYaw;
-      let headPitch =
-        -headInputY * MOTION_CONFIG.head.maxPitchRad + headBreathPitch + surgeJitterPitch;
+      let headYaw = -headInputX * MOTION_CONFIG.head.maxYawRad + headBreathYaw;
+      let headPitch = -headInputY * MOTION_CONFIG.head.maxPitchRad + headBreathPitch;
       const headRoll = headYaw * MOTION_CONFIG.head.rollPerYawRatio + headBreathRoll;
 
       // Desired independent eye rotation & translation inside the helmet cavity
@@ -500,61 +452,11 @@ export const VisorScene: React.FC<VisorSceneProps> = ({ simRef, onTelemetrySampl
       headGroup.updateMatrixWorld(true);
       camera.updateMatrixWorld(true);
 
-      // Compute live vitals & HUD inputs from simulation state + events
-      const liveO2 = Math.max(
-        0.04,
-        sim.o2BaselinePct -
-          (leakActiveEvent ? 0.042 + 0.008 * Math.sin(absElapsed * 3.1) : 0) +
-          HUD_CONFIG.vitals.o2.amp * Math.sin(elapsedSec * HUD_CONFIG.vitals.o2.freq * Math.PI)
-      );
-      const liveAtm = Math.max(
-        2.0,
-        sim.atmBaselineMb +
-          (surgeActiveEvent ? 2.6 + 0.55 * Math.sin(absElapsed * 7.2) : 0) +
-          HUD_CONFIG.vitals.atm.amp * Math.cos(elapsedSec * HUD_CONFIG.vitals.atm.freq * Math.PI)
-      );
-
       // Update shaders & live projected HUD canvas
       panUniforms.uTime.value = absElapsed;
       const pitchNorm = -(headPitch + eyePitch) / Math.max(0.01, maxSafePitch);
-      hudRenderer.update(now, elapsedSec, pitchNorm, {
-        o2OverridePct: liveO2,
-        atmOverrideMb: liveAtm,
-        forceRadAlert: radActiveEvent,
-        manualScanStartSec,
-      });
+      hudRenderer.update(now, elapsedSec, pitchNorm);
       visorGlass.updateUniforms(camera.matrixWorldInverse);
-
-      if (telemetryCbRef.current && now - lastTelemetryEmitMs >= telemetryIntervalMs) {
-        lastTelemetryEmitMs = now;
-        const activeEvents: SimEventId[] = [];
-        if (radActiveEvent) activeEvents.push("radiation_burst");
-        if (leakActiveEvent) activeEvents.push("o2_leak");
-        if (surgeActiveEvent) activeEvents.push("pressure_surge");
-        if (scanActiveEvent) activeEvents.push("terrain_scan");
-
-        const altKm =
-          HUD_CONFIG.altitudeTape.baseValue -
-          pitchNorm * 0.84 +
-          Math.sin(elapsedSec * 0.45) * 0.03;
-
-        telemetryCbRef.current({
-          timestampMs: now,
-          o2Pct: liveO2,
-          atmMb: liveAtm,
-          radMsvH: radActiveEvent
-            ? 4.85 + 0.65 * Math.sin(absElapsed * 5.2)
-            : 1.42 + 0.14 * Math.sin(absElapsed * 1.1),
-          radAlertActive: radActiveEvent || elapsedSec >= HUD_CONFIG.timings.radAlertDelaySec,
-          altitudeKm: altKm,
-          headYawDeg: THREE.MathUtils.radToDeg(headYaw),
-          headPitchDeg: THREE.MathUtils.radToDeg(headPitch),
-          eyeYawDeg: THREE.MathUtils.radToDeg(eyeYaw),
-          eyePitchDeg: THREE.MathUtils.radToDeg(eyePitch),
-          bpmEstimate: Math.round(74 * effectiveExertion + (radActiveEvent ? 14 : 0)),
-          activeEvents,
-        });
-      }
 
       // Pass 1: Untouched Mars panorama directly to screen
       marsGroup.visible = true;

@@ -547,29 +547,3 @@ export const HUD_CONFIG = {
     maxAlphaPeriodic: 0.52,
   },
 } as const;
-
-export const DASHBOARD_CONFIG = {
-  /** Exact visor optical viewport ratio (170° H / 120° V = 1.4167:1) */
-  visorAspectRatio: 170 / 120,
-  telemetryUiHz: 10,
-  events: {
-    radiationBurstDurationMs: 12000,
-    o2LeakDurationMs: 12000,
-    pressureSurgeDurationMs: 9000,
-    terrainScanDurationMs: 4000,
-  },
-  bounds: {
-    o2Min: 0.06,
-    o2Max: 0.22,
-    o2Step: 0.002,
-    atmMin: 3.5,
-    atmMax: 12.0,
-    atmStep: 0.1,
-    exertionMin: 0.6,
-    exertionMax: 2.2,
-    exertionStep: 0.05,
-    trackingGainMin: 0.4,
-    trackingGainMax: 1.5,
-    trackingGainStep: 0.05,
-  },
-} as const;
