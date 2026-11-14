@@ -116,8 +116,10 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     };
 
     const base = import.meta.env.BASE_URL;
-    const skyTex = configureTex(loader.load(`${base}mars/mars-sky.webp`), true);
-    const terrainTex = configureTex(loader.load(`${base}mars/mars-terrain.webp`), true);
+    // Keep textures in raw sRGB / NoColorSpace so custom ShaderMaterials render exact raw NASA
+    // image brightness without linear-to-sRGB gamma crushing or color-shift.
+    const skyTex = configureTex(loader.load(`${base}mars/mars-sky.webp`), false);
+    const terrainTex = configureTex(loader.load(`${base}mars/mars-terrain.webp`), false);
     const depthTex = configureTex(loader.load(`${base}mars/mars-depth.png`), false);
 
     const [initPanW, initPanH] = computePanHalf(initAspect);
@@ -159,26 +161,6 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
 
         void main() {
           vec3 col = texture2D(uSkyMap, vUv).rgb;
-
-          // Subtle high-altitude Martian dust cirrus drift
-          float skyBand = smoothstep(0.68, 0.96, vUv.y);
-          float cloudA = fbm(vec2(vUv.x * 4.5 - uTime * 0.008, vUv.y * 9.0 + uTime * 0.002));
-          float cloudB = fbm(vec2(vUv.x * 8.2 - uTime * 0.014 + 3.1, vUv.y * 14.0));
-          float wisp = smoothstep(0.46, 0.80, cloudA * 0.65 + cloudB * 0.35) * skyBand;
-          col = mix(col, col + vec3(0.09, 0.065, 0.042), wisp * 0.30);
-
-          // Clear, soft warm Martian sun area with surrounding atmospheric haze (shifts subtly on turn)
-          vec2 sunPos = vec2(0.77, 0.85) + uHead * vec2(-0.028, 0.018);
-          vec2 d = vUv - sunPos;
-          d.x *= (uPanHalf.x / max(0.001, uPanHalf.y));
-          float r = length(d);
-          float sunDisc = exp(-r * 22.0) * 0.56;
-          float innerBloom = exp(-r * 8.2) * 0.34;
-          float dustHaze = exp(-r * 2.15) * 0.24;
-          col += vec3(1.0, 0.90, 0.76) * sunDisc
-               + vec3(1.0, 0.78, 0.52) * innerBloom
-               + vec3(0.96, 0.65, 0.36) * dustHaze;
-
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -240,34 +222,11 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
 
           vec3 col = tex.rgb;
 
-          // Slightly raise ground contrast while keeping natural dark regolith floor
-          col = clamp((col - 0.36) * 1.14 + 0.36, 0.0, 1.0);
-
-          // Brighter edges on rocks facing the upper-right sun (directional relief edge catchlight)
-          vec2 sunStep = normalize(vec2(0.78, 0.62) + uHead * vec2(-0.18, 0.12)) * vec2(0.0014, 0.0028);
-          vec3 sampleAway = texture2D(uTerrainMap, clamp(uvSample - sunStep, 0.001, 0.999)).rgb;
-          float lumHere = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
-          float lumBehind = dot(sampleAway, vec3(0.299, 0.587, 0.114));
-          float sunEdge = smoothstep(0.006, 0.075, lumHere - lumBehind);
-          float rockWeight = 0.25 + 0.75 * smoothstep(0.06, 0.75, depthSample);
-          col += vec3(1.0, 0.76, 0.48) * (sunEdge * rockWeight * 0.28);
-
-          // Atmospheric distance dust veil (pure tint modulation, zero silhouette duplication)
-          float distWeight = 1.0 - smoothstep(0.04, 0.58, depthSample);
-          float dustNoise = fbm(vec2(vUv.x * 4.2 - uTime * 0.015, vUv.y * 6.5 - uTime * 0.004));
-          vec3 dustColor = vec3(0.56, 0.43, 0.34);
-          col = mix(col, dustColor, distWeight * (0.04 + dustNoise * 0.07));
-
-          // Gentle darker falloff away from upper-right sun + responsive forward glare scatter
-          vec2 sunPos = vec2(0.77, 0.85) + uHead * vec2(-0.028, 0.018);
-          float awayDist = clamp(dot(vUv - sunPos, vec2(-0.72, -0.69)), 0.0, 1.45);
-          col *= mix(1.06, 0.82, smoothstep(0.0, 1.35, awayDist));
-
-          vec2 d = vUv - sunPos;
-          d.x *= (uPanHalf.x / max(0.001, uPanHalf.y));
-          float r = length(d);
-          float forwardScatter = exp(-r * 2.2) * 0.095 * (0.35 + 0.65 * distWeight);
-          col += vec3(1.0, 0.72, 0.44) * forwardScatter;
+          // Gently lift deep foreground/bottom shadows without adding contrast or tint
+          float lum = dot(col, vec3(0.299, 0.587, 0.114));
+          float shadowMask = 1.0 - smoothstep(0.0, 0.32, lum);
+          float bottomWeight = 1.0 - smoothstep(0.0, 0.42, vUv.y);
+          col = min(vec3(1.0), col + vec3(shadowMask * (0.025 + 0.035 * bottomWeight)));
 
           gl_FragColor = vec4(col, 1.0);
         }

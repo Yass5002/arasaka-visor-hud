@@ -215,8 +215,8 @@ export const VisorFrame: React.FC = () => {
             d={APERTURE_PATH}
             fill="none"
             stroke="#020203"
-            strokeOpacity="0.70"
-            strokeWidth="32"
+            strokeOpacity="0.42"
+            strokeWidth="20"
             filter="url(#glassContactShadow)"
           />
         </g>
