@@ -166,15 +166,16 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
           col = mix(col, cloudTint, cloudMask * skyHeightMask * 0.14);
 
           // Soft atmospheric sun glare in upper-right sky shifting gently with head movement
-          vec2 sunCenter = vec2(0.76 - uHead.x * 0.032, 0.87 + uHead.y * 0.022);
+          vec2 sunCenter = vec2(0.77 - uHead.x * 0.032, 0.88 + uHead.y * 0.022);
           vec2 sunDelta = (uv - sunCenter) * vec2(uTexAspect, 1.0);
           float sunDist = length(sunDelta);
-          float wideGlow = exp(-sunDist * 3.2) * 0.24;
-          float coreGlow = exp(-sunDist * 11.5) * 0.30;
-          float softDisc = smoothstep(0.065, 0.0, sunDist) * 0.16;
+          float wideGlow = exp(-sunDist * 2.8) * 0.22;
+          float coreGlow = exp(-sunDist * 9.0) * 0.20;
 
-          vec3 glareColor = vec3(1.0, 0.86, 0.68);
-          col += glareColor * (wideGlow + coreGlow + softDisc);
+          // Pure warm Martian dust sunlight (no green/cyan channel clipping)
+          vec3 glareColor = vec3(1.0, 0.66, 0.34);
+          vec3 warmCore   = vec3(1.0, 0.80, 0.54);
+          col += glareColor * wideGlow + warmCore * coreGlow;
 
           gl_FragColor = vec4(col, 1.0);
         }
@@ -354,22 +355,20 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
         varying vec2 vUv;
 
         void main() {
-          // Soft sun glare source in upper-right sky that drifts gently with head pose
-          vec2 sunScreen = vec2(0.76 - uHead.x * 0.10, 0.85 + uHead.y * 0.07);
+          // Soft warm sun glare source in upper-right sky that drifts gently with head pose
+          vec2 sunScreen = vec2(0.78 - uHead.x * 0.10, 0.86 + uHead.y * 0.07);
           vec2 delta = (vUv - sunScreen) * vec2(uViewportAspect, 1.0);
           float dist = length(delta);
 
-          // Broad soft atmospheric sun scatter washing subtly across upper-right sky & ridge
-          float broadScatter = exp(-dist * 2.1) * 0.095;
-          // Subtle soft anamorphic optical streak
-          float streak = exp(-abs(delta.y) * 14.0) * exp(-abs(delta.x) * 1.9) * 0.045;
-          // Faint warm optical ghost ring opposite the sun center
-          vec2 ghostPos = vec2(0.5, 0.5) - (sunScreen - vec2(0.5, 0.5)) * 0.55;
-          float gDist = length((vUv - ghostPos) * vec2(uViewportAspect, 1.0));
-          float ghostRing = smoothstep(0.06, 0.02, abs(gDist - 0.14)) * 0.018;
+          // Broad soft warm atmospheric scatter washing across upper-right sky & ridge
+          float broadScatter = exp(-dist * 1.9) * 0.11;
+          // Soft warm diagonal solar flare streak angled toward center-left
+          float diag = delta.x * 0.65 + delta.y * 0.76;
+          float perp = -delta.x * 0.76 + delta.y * 0.65;
+          float diagStreak = exp(-abs(perp) * 9.5) * exp(-abs(diag) * 2.2) * 0.045;
 
-          vec3 col = vec3(1.0, 0.80, 0.58) * (broadScatter + streak)
-                   + vec3(0.95, 0.70, 0.52) * ghostRing;
+          vec3 col = vec3(1.0, 0.68, 0.36) * broadScatter
+                   + vec3(1.0, 0.78, 0.50) * diagStreak;
           gl_FragColor = vec4(col, 1.0);
         }
       `,
