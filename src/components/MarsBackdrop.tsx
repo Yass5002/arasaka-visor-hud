@@ -89,10 +89,10 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     };
 
     const base = import.meta.env.BASE_URL;
-    const skyTex = configureTex(loader.load(`${base}mars/mars-sky.jpg`), true);
-    const farTex = configureTex(loader.load(`${base}mars/mars-far.png`), true);
-    const midTex = configureTex(loader.load(`${base}mars/mars-mid.png`), true);
-    const nearTex = configureTex(loader.load(`${base}mars/mars-near.png`), true);
+    const skyTex = configureTex(loader.load(`${base}mars/mars-sky.webp`), true);
+    const farTex = configureTex(loader.load(`${base}mars/mars-far.webp`), true);
+    const midTex = configureTex(loader.load(`${base}mars/mars-mid.webp`), true);
+    const nearTex = configureTex(loader.load(`${base}mars/mars-near.webp`), true);
     const depthTex = configureTex(loader.load(`${base}mars/mars-depth.png`), false);
 
     // Panorama natural aspect = 3200 / 1634
