@@ -58,13 +58,21 @@ export const VisorOptics: React.FC = () => {
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          {/* Warm soft diagonal sunlight glare sweeping from upper-right sun */}
-          <linearGradient id="diagonalSunGlare" x1="0.88" y1="0.06" x2="0.24" y2="0.72">
-            <stop offset="0%" stopColor="#ffe1b8" stopOpacity="0.19" />
-            <stop offset="30%" stopColor="#f6bc88" stopOpacity="0.095" />
-            <stop offset="65%" stopColor="#df925c" stopOpacity="0.028" />
-            <stop offset="100%" stopColor="#df925c" stopOpacity="0" />
+          {/* Soft diagonal sunlight streak sweeping gently from upper-right sun */}
+          <linearGradient id="diagonalSunGlare" x1="0.88" y1="0.06" x2="0.22" y2="0.74">
+            <stop offset="0%" stopColor="#ffe5be" stopOpacity="0.24" />
+            <stop offset="28%" stopColor="#f8be86" stopOpacity="0.12" />
+            <stop offset="62%" stopColor="#e0925a" stopOpacity="0.036" />
+            <stop offset="100%" stopColor="#e0925a" stopOpacity="0" />
           </linearGradient>
+
+          {/* Soft warm solar bloom directly on the upper-right glass near the sun */}
+          <radialGradient id="glassSunBloom" cx="77%" cy="16%" r="28%">
+            <stop offset="0%" stopColor="#fff0d8" stopOpacity="0.24" />
+            <stop offset="32%" stopColor="#ffcb94" stopOpacity="0.13" />
+            <stop offset="68%" stopColor="#e59356" stopOpacity="0.045" />
+            <stop offset="100%" stopColor="#e59356" stopOpacity="0" />
+          </radialGradient>
 
           {/* Secondary curved visor edge specular sweep */}
           <linearGradient id="curvedRimSpecular" x1="0.25" y1="0" x2="0.95" y2="0.55">
@@ -165,12 +173,15 @@ export const VisorOptics: React.FC = () => {
         </g>
 
         {/* ============================================================
-            2. SOFT WARM DIAGONAL SUN GLARE ON THE CURVED GLASS
+            2. SOFT WARM DIAGONAL SUN STREAK & BLOOM ON CURVED GLASS
+               (responds to head turn so glare shifts naturally)
            ============================================================ */}
         <g className="visor-optics-reflections" filter="url(#glareBlur)">
-          {/* Soft diagonal sunlight shaft across upper-right quadrant toward lower-mid-left */}
+          {/* Soft warm bloom near the upper-right sun */}
+          <ellipse cx="1485" cy="175" rx="460" ry="300" fill="url(#glassSunBloom)" />
+          {/* Soft diagonal sunlight streak across upper-right quadrant toward lower-mid-left */}
           <path
-            d="M 1190,62 L 1780,104 L 1812,290 L 790,695 L 590,545 Z"
+            d="M 1185,54 L 1790,98 L 1816,296 L 760,725 L 555,565 Z"
             fill="url(#diagonalSunGlare)"
           />
           {/* Subtle upper curved visor dome specular arc */}

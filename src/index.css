@@ -77,8 +77,8 @@ body,
 
 .visor-optics-reflections {
   transform: translate3d(
-    calc(var(--head-x) * 14px),
-    calc(var(--head-y) * 10px),
+    calc(var(--head-x) * 20px),
+    calc(var(--head-y) * 14px),
     0
   );
   will-change: transform;
@@ -86,8 +86,8 @@ body,
 
 .visor-optics-specks {
   transform: translate3d(
-    calc(var(--head-x) * -4px),
-    calc(var(--head-y) * -3px),
+    calc(var(--head-x) * -6px),
+    calc(var(--head-y) * -4px),
     0
   );
   will-change: transform;
