@@ -36,11 +36,28 @@ const NOISE_GLSL = /* glsl */ `
   }
 `;
 
+const TEX_ASPECT = 2400 / 1225;
+const FOV_DEG = 46;
+const COVER_SCALE = 1.13;
+
+function computePanHalf(viewportAspect: number): [number, number] {
+  const tanHalfY = Math.tan(THREE.MathUtils.degToRad(FOV_DEG * 0.5));
+  const tanHalfX = tanHalfY * viewportAspect;
+  if (viewportAspect <= TEX_ASPECT) {
+    const h = tanHalfY * COVER_SCALE;
+    return [h * TEX_ASPECT, h];
+  }
+  const w = tanHalfX * COVER_SCALE;
+  return [w, w / TEX_ASPECT];
+}
+
 /**
- * Multi-layer NASA Perseverance panorama (PIA24663) backdrop rendered with
- * 4 depth planes (sky, far, mid, near), depth-map relief parallax, horizon heat
- * shimmer, slow drifting dust haze/clouds, shifting soft sun glare, and heavy
- * cursor + breathing sway inertia.
+ * NASA Perseverance panorama (PIA24663) rendered with two 100% opaque layers:
+ * 1) Solid Mars sky plane at far distance with slowly drifting cirrus wisps & warm sun scatter.
+ * 2) Solid 3D depth-displaced terrain mesh (far rim -> mid plains -> near boulders) with crisp
+ *    ridge cutout (alphaTest / discard), subtle heat shimmer & windborne dust haze, and genuine
+ *    perspective parallax driven exclusively by heavily damped camera movement (zero transparent
+ *    layer overlaps, zero frame blending/trails, zero motion ghosting).
  */
 export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -53,8 +70,9 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
+    const initAspect = width / height;
 
-    // Optional URL parameter ?look=x,y for reproducible multi-angle captures
+    // Optional URL parameter ?look=x,y for deterministic capture angles
     const params = new URLSearchParams(window.location.search);
     const lookParam = params.get("look");
     let initX = 0;
@@ -66,116 +84,97 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     }
 
     const scene = new THREE.Scene();
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
-    camera.position.z = 5;
+    const camera = new THREE.PerspectiveCamera(FOV_DEG, initAspect, 0.5, 300);
+    camera.position.set(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       powerPreference: "high-performance",
+      preserveDrawingBuffer: false,
     });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
+
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    container.innerHTML = "";
     container.appendChild(renderer.domElement);
 
     const loader = new THREE.TextureLoader();
-    const configureTex = (tex: THREE.Texture, isColor = true) => {
+    const configureTex = (tex: THREE.Texture, srgb: boolean) => {
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
       tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
-      if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
+      tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      tex.generateMipmaps = false;
+      tex.needsUpdate = true;
       return tex;
     };
 
     const base = import.meta.env.BASE_URL;
     const skyTex = configureTex(loader.load(`${base}mars/mars-sky.webp`), true);
-    const farTex = configureTex(loader.load(`${base}mars/mars-far.webp`), true);
-    const midTex = configureTex(loader.load(`${base}mars/mars-mid.webp`), true);
-    const nearTex = configureTex(loader.load(`${base}mars/mars-near.webp`), true);
+    const terrainTex = configureTex(loader.load(`${base}mars/mars-terrain.webp`), true);
     const depthTex = configureTex(loader.load(`${base}mars/mars-depth.png`), false);
 
-    // Panorama natural aspect = 3200 / 1634
-    const texAspect = 3200 / 1634;
+    const [initPanW, initPanH] = computePanHalf(initAspect);
     const sharedUniforms = {
       uTime: { value: 0 },
       uHead: { value: new THREE.Vector2(initX, initY) },
-      uViewportAspect: { value: width / height },
-      uTexAspect: { value: texAspect },
-      uDepthMap: { value: depthTex },
+      uPanHalf: { value: new THREE.Vector2(initPanW, initPanH) },
+      uViewportAspect: { value: initAspect },
     };
 
-    const COVER_UV_GLSL = /* glsl */ `
-      // Maps screen UV [0..1] into zoomed panorama UV with safe overscan margins for parallax
-      vec2 getBaseUv(vec2 uv, float vpAspect, float txAspect) {
-        float zoom = 1.15; // Overscan so head movement never exposes edges
-        vec2 centered = uv - 0.5;
-        if (vpAspect > txAspect) {
-          centered.y *= (txAspect / vpAspect);
-        } else {
-          centered.x *= (vpAspect / txAspect);
-        }
-        // Slight downward framing adjustment so horizon sits naturally at ~34% height
-        vec2 framed = centered / zoom + vec2(0.5, 0.515);
-        return framed;
-      }
-    `;
-
     // =========================================================================
-    // LAYER 1: SKY (Slow high-altitude dust clouds + shifting soft sun glare)
+    // 1. OPAQUE SKY LAYER (far background Z = -148)
     // =========================================================================
     const skyMat = new THREE.ShaderMaterial({
-      depthWrite: false,
       uniforms: {
         ...sharedUniforms,
-        uTex: { value: skyTex },
+        uSkyMap: { value: skyTex },
       },
+      transparent: false,
+      depthWrite: true,
       vertexShader: /* glsl */ `
+        uniform vec2 uPanHalf;
         varying vec2 vUv;
         void main() {
           vUv = uv;
-          gl_Position = vec4(position.xy, 0.9, 1.0);
+          vec2 p = uv * 2.0 - 1.0;
+          float dist = 148.0;
+          vec3 worldPos = vec3(p.x * uPanHalf.x * dist, p.y * uPanHalf.y * dist, -dist);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
-        uniform sampler2D uTex;
         uniform float uTime;
         uniform vec2 uHead;
-        uniform float uViewportAspect;
-        uniform float uTexAspect;
+        uniform vec2 uPanHalf;
+        uniform sampler2D uSkyMap;
         varying vec2 vUv;
-
         ${NOISE_GLSL}
-        ${COVER_UV_GLSL}
 
         void main() {
-          vec2 uv = getBaseUv(vUv, uViewportAspect, uTexAspect);
-          // Minimal sky parallax (distant infinity)
-          uv += vec2(uHead.x * 0.011, -uHead.y * 0.008);
-          uv = clamp(uv, 0.002, 0.998);
+          vec3 col = texture2D(uSkyMap, vUv).rgb;
 
-          vec3 col = texture2D(uTex, uv).rgb;
+          // Subtle high-altitude Martian dust cirrus drift
+          float skyBand = smoothstep(0.68, 0.96, vUv.y);
+          float cloudA = fbm(vec2(vUv.x * 4.5 - uTime * 0.008, vUv.y * 9.0 + uTime * 0.002));
+          float cloudB = fbm(vec2(vUv.x * 8.2 - uTime * 0.014 + 3.1, vUv.y * 14.0));
+          float wisp = smoothstep(0.46, 0.80, cloudA * 0.65 + cloudB * 0.35) * skyBand;
+          col = mix(col, col + vec3(0.09, 0.065, 0.042), wisp * 0.30);
 
-          // Slow high-altitude Martian cirrus / dust clouds drifting gently across sky
-          vec2 cloudUv = vec2(uv.x * 3.4 + uTime * 0.007, uv.y * 7.5 - uTime * 0.0015);
-          float c1 = fbm(cloudUv);
-          float c2 = fbm(cloudUv * 2.1 + vec2(uTime * 0.004, 2.3));
-          float cloudMask = smoothstep(0.46, 0.82, c1 * 0.65 + c2 * 0.35);
-          float skyHeightMask = smoothstep(0.66, 0.96, uv.y);
-          vec3 cloudTint = vec3(0.86, 0.72, 0.56);
-          col = mix(col, cloudTint, cloudMask * skyHeightMask * 0.14);
-
-          // Soft atmospheric sun glare in upper-right sky shifting gently with head movement
-          vec2 sunCenter = vec2(0.77 - uHead.x * 0.032, 0.88 + uHead.y * 0.022);
-          vec2 sunDelta = (uv - sunCenter) * vec2(uTexAspect, 1.0);
-          float sunDist = length(sunDelta);
-          float wideGlow = exp(-sunDist * 2.8) * 0.22;
-          float coreGlow = exp(-sunDist * 9.0) * 0.20;
-
-          // Pure warm Martian dust sunlight (no green/cyan channel clipping)
-          vec3 glareColor = vec3(1.0, 0.66, 0.34);
-          vec3 warmCore   = vec3(1.0, 0.80, 0.54);
-          col += glareColor * wideGlow + warmCore * coreGlow;
+          // Soft warm Martian solar halo in upper-right sky
+          vec2 sunPos = vec2(0.76, 0.82) + uHead * vec2(-0.015, 0.010);
+          vec2 d = vUv - sunPos;
+          d.x *= (uPanHalf.x / max(0.001, uPanHalf.y));
+          float r = length(d);
+          float coreHalo = exp(-r * 8.5) * 0.24;
+          float broadGlow = exp(-r * 2.6) * 0.14;
+          col += vec3(1.0, 0.78, 0.52) * coreHalo + vec3(0.95, 0.64, 0.36) * broadGlow;
 
           gl_FragColor = vec4(col, 1.0);
         }
@@ -183,208 +182,93 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     });
 
     // =========================================================================
-    // LAYER 2: FAR MOUNTAINS & HORIZON HEAT SHIMMER
+    // 2. OPAQUE 3D DEPTH-DISPLACED TERRAIN MESH (far rim -> mid -> near boulders)
     // =========================================================================
-    const farMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
+    const terrainMat = new THREE.ShaderMaterial({
       uniforms: {
         ...sharedUniforms,
-        uTex: { value: farTex },
+        uTerrainMap: { value: terrainTex },
+        uDepthMap: { value: depthTex },
       },
+      transparent: false,
+      depthWrite: true,
       vertexShader: /* glsl */ `
+        uniform vec2 uPanHalf;
+        uniform sampler2D uDepthMap;
         varying vec2 vUv;
+        varying float vDepth;
+
         void main() {
           vUv = uv;
-          gl_Position = vec4(position.xy, 0.7, 1.0);
+          float d = texture2D(uDepthMap, uv).r;
+          vDepth = d;
+          vec2 p = uv * 2.0 - 1.0;
+
+          // Map normalized depth (0 = distant ridge, 1 = nearest foreground boulders)
+          // strictly along the camera ray so projection is exact at rest and produces
+          // natural continuous 3D parallax without overlapping semi-transparent slices.
+          float dist = mix(94.0, 22.0, pow(d, 0.90));
+          vec3 worldPos = vec3(p.x * uPanHalf.x * dist, p.y * uPanHalf.y * dist, -dist);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
-        uniform sampler2D uTex;
-        uniform sampler2D uDepthMap;
         uniform float uTime;
         uniform vec2 uHead;
-        uniform float uViewportAspect;
-        uniform float uTexAspect;
-        varying vec2 vUv;
-
-        ${NOISE_GLSL}
-        ${COVER_UV_GLSL}
-
-        void main() {
-          vec2 uv = getBaseUv(vUv, uViewportAspect, uTexAspect);
-          uv += vec2(uHead.x * 0.026, -uHead.y * 0.017);
-
-          float d = texture2D(uDepthMap, clamp(uv, 0.002, 0.998)).r;
-
-          // Subtle horizon heat shimmer concentrated near the distant ridge & far plain
-          float horizonBand = smoothstep(0.01, 0.08, d) * (1.0 - smoothstep(0.10, 0.28, d));
-          float shimWave = sin(uv.y * 190.0 - uTime * 3.6 + uv.x * 42.0) * 0.5
-                         + (vnoise(vec2(uv.x * 55.0 + uTime * 0.9, uv.y * 95.0 - uTime * 2.2)) - 0.5);
-          vec2 shimmerUv = uv + vec2(shimWave * 0.00055, shimWave * 0.00085) * horizonBand;
-
-          vec4 texel = texture2D(uTex, clamp(shimmerUv, 0.002, 0.998));
-
-          // Soft atmospheric dust scattering along distant ridge
-          float farDust = fbm(vec2(uv.x * 5.0 + uTime * 0.012, uv.y * 9.0));
-          vec3 hazeCol = vec3(0.72, 0.55, 0.39);
-          texel.rgb = mix(texel.rgb, hazeCol, horizonBand * (0.14 + farDust * 0.14));
-
-          gl_FragColor = texel;
-        }
-      `,
-    });
-
-    // =========================================================================
-    // LAYER 3: MIDGROUND TERRAIN + DRIFTING DUST HAZE + DEPTH RELIEF
-    // =========================================================================
-    const midMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        ...sharedUniforms,
-        uTex: { value: midTex },
-      },
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position.xy, 0.5, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform sampler2D uTex;
+        uniform vec2 uPanHalf;
+        uniform sampler2D uTerrainMap;
         uniform sampler2D uDepthMap;
-        uniform float uTime;
-        uniform vec2 uHead;
-        uniform float uViewportAspect;
-        uniform float uTexAspect;
         varying vec2 vUv;
-
+        varying float vDepth;
         ${NOISE_GLSL}
-        ${COVER_UV_GLSL}
 
         void main() {
-          vec2 uv = getBaseUv(vUv, uViewportAspect, uTexAspect);
-          uv += vec2(uHead.x * 0.048, -uHead.y * 0.028);
+          // Delicate horizon heat shimmer strictly near distant rim
+          float depthSample = texture2D(uDepthMap, vUv).r;
+          float horizonBand = smoothstep(0.0, 0.04, depthSample) * (1.0 - smoothstep(0.05, 0.17, depthSample));
+          vec2 uvSample = vUv;
+          float shimmer = (vnoise(vec2(vUv.x * 58.0 + uTime * 1.4, vUv.y * 92.0 - uTime * 2.6)) - 0.5);
+          uvSample.x += shimmer * 0.00055 * horizonBand;
+          uvSample.y += shimmer * 0.00035 * horizonBand;
 
-          float d = texture2D(uDepthMap, clamp(uv, 0.002, 0.998)).r;
-          // Per-pixel depth relief shift
-          uv += vec2(uHead.x * d * 0.010, -uHead.y * d * 0.007);
+          vec4 tex = texture2D(uTerrainMap, uvSample);
+          // Hard cutout along mountain ridge — everything below ridge is 100% opaque
+          if (tex.a < 0.5) discard;
 
-          vec4 texel = texture2D(uTex, clamp(uv, 0.002, 0.998));
+          vec3 col = tex.rgb;
 
-          // Slowly drifting low Martian dust haze sweeping across mid-ground plain
-          float hazeNoise = fbm(vec2(uv.x * 3.8 - uTime * 0.014, uv.y * 6.5 + uTime * 0.003));
-          float hazeLayer = smoothstep(0.36, 0.80, hazeNoise);
-          vec3 dustTone = vec3(0.68, 0.48, 0.32);
-          texel.rgb = mix(texel.rgb, dustTone, hazeLayer * 0.13);
+          // Atmospheric distance dust veil (pure tint modulation, zero silhouette duplication)
+          float distWeight = 1.0 - smoothstep(0.04, 0.58, depthSample);
+          float dustNoise = fbm(vec2(vUv.x * 4.2 - uTime * 0.015, vUv.y * 6.5 - uTime * 0.004));
+          vec3 dustColor = vec3(0.56, 0.43, 0.34);
+          col = mix(col, dustColor, distWeight * (0.04 + dustNoise * 0.07));
 
-          gl_FragColor = texel;
-        }
-      `,
-    });
+          // Soft warm forward-scattered sunlight glow across sunward upper-right ridge
+          vec2 sunPos = vec2(0.76, 0.82) + uHead * vec2(-0.015, 0.010);
+          vec2 d = vUv - sunPos;
+          d.x *= (uPanHalf.x / max(0.001, uPanHalf.y));
+          float r = length(d);
+          float forwardScatter = exp(-r * 2.4) * 0.065 * (0.35 + 0.65 * distWeight);
+          col += vec3(1.0, 0.72, 0.44) * forwardScatter;
 
-    // =========================================================================
-    // LAYER 4: NEAR FOREGROUND BOULDERS + ROCK RELIEF + VEIL + SUN GLARE BLOOM
-    // =========================================================================
-    const nearMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        ...sharedUniforms,
-        uTex: { value: nearTex },
-      },
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position.xy, 0.3, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform sampler2D uTex;
-        uniform sampler2D uDepthMap;
-        uniform float uTime;
-        uniform vec2 uHead;
-        uniform float uViewportAspect;
-        uniform float uTexAspect;
-        varying vec2 vUv;
-
-        ${NOISE_GLSL}
-        ${COVER_UV_GLSL}
-
-        void main() {
-          vec2 uv = getBaseUv(vUv, uViewportAspect, uTexAspect);
-          uv += vec2(uHead.x * 0.072, -uHead.y * 0.040);
-
-          // Sample local depth twice so foreground boulders physically shift forward
-          float d0 = texture2D(uDepthMap, clamp(uv, 0.002, 0.998)).r;
-          vec2 reliefUv = uv + vec2(uHead.x * d0 * 0.018, -uHead.y * d0 * 0.011);
-
-          vec4 texel = texture2D(uTex, clamp(reliefUv, 0.002, 0.998));
-
-          // Subtle ground-skimming dust haze drift
-          float lowHaze = fbm(vec2(reliefUv.x * 3.0 - uTime * 0.020, reliefUv.y * 5.0));
-          vec3 hazeTone = vec3(0.64, 0.44, 0.29);
-          texel.rgb = mix(texel.rgb, hazeTone, smoothstep(0.45, 0.85, lowHaze) * 0.09);
-
-          gl_FragColor = texel;
-        }
-      `,
-    });
-
-    // =========================================================================
-    // LAYER 5: FULL-SCENE SOFT SUN VEIL GLARE OVERLAY (SHIFTS WITH HEAD)
-    // =========================================================================
-    const glareMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: sharedUniforms,
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position.xy, 0.1, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform vec2 uHead;
-        uniform float uViewportAspect;
-        varying vec2 vUv;
-
-        void main() {
-          // Soft warm sun glare source in upper-right sky that drifts gently with head pose
-          vec2 sunScreen = vec2(0.78 - uHead.x * 0.10, 0.86 + uHead.y * 0.07);
-          vec2 delta = (vUv - sunScreen) * vec2(uViewportAspect, 1.0);
-          float dist = length(delta);
-
-          // Broad soft warm atmospheric scatter washing across upper-right sky & ridge
-          float broadScatter = exp(-dist * 1.9) * 0.11;
-          // Soft warm diagonal solar flare streak angled toward center-left
-          float diag = delta.x * 0.65 + delta.y * 0.76;
-          float perp = -delta.x * 0.76 + delta.y * 0.65;
-          float diagStreak = exp(-abs(perp) * 9.5) * exp(-abs(diag) * 2.2) * 0.045;
-
-          vec3 col = vec3(1.0, 0.68, 0.36) * broadScatter
-                   + vec3(1.0, 0.78, 0.50) * diagStreak;
           gl_FragColor = vec4(col, 1.0);
         }
       `,
     });
 
-    const quadGeo = new THREE.PlaneGeometry(2, 2);
-    const skyMesh = new THREE.Mesh(quadGeo, skyMat);
-    const farMesh = new THREE.Mesh(quadGeo, farMat);
-    const midMesh = new THREE.Mesh(quadGeo, midMat);
-    const nearMesh = new THREE.Mesh(quadGeo, nearMat);
-    const glareMesh = new THREE.Mesh(quadGeo, glareMat);
+    const skyGeo = new THREE.PlaneGeometry(2, 2, 1, 1);
+    const terrainGeo = new THREE.PlaneGeometry(2, 2, 240, 120);
 
-    scene.add(skyMesh, farMesh, midMesh, nearMesh, glareMesh);
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+    // Disable frustum culling because PlaneGeometry bounds (-1..1) do not reflect vertex displacement
+    skyMesh.frustumCulled = false;
+    terrainMesh.frustumCulled = false;
+
+    scene.add(skyMesh, terrainMesh);
 
     // =========================================================================
-    // HEAVY CURSOR INERTIA + LAGGED BREATHING SWAY
+    // DAMPED CAMERA MOVEMENT + GENTLE BREATHING SWAY (NO FRAME BLENDING)
     // =========================================================================
     let targetX = initX;
     let targetY = initY;
@@ -396,7 +280,6 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     const handlePointerMove = (e: PointerEvent) => {
       const nx = (e.clientX / (window.innerWidth || 1)) * 2 - 1;
       const ny = (e.clientY / (window.innerHeight || 1)) * 2 - 1;
-      // Keep movement small and heavy
       targetX = Math.max(-1, Math.min(1, nx));
       targetY = Math.max(-1, Math.min(1, ny));
     };
@@ -417,18 +300,25 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
       prevTime = now;
       const elapsed = now / 1000;
 
-      // Heavy helmet damping toward cursor target
-      const primaryLerp = 1 - Math.exp(-2.8 * dt);
+      // Heavy helmet neck inertia
+      const primaryLerp = 1 - Math.exp(-3.0 * dt);
       currentX += (targetX - currentX) * primaryLerp;
       currentY += (targetY - currentY) * primaryLerp;
 
-      // Gentle breathing sway with slight secondary lag
+      // Small lagged breathing sway
       const breathCycle = Math.sin(elapsed * 1.15) * 0.022 + Math.sin(elapsed * 0.52) * 0.010;
       const lateralMicroSway = Math.cos(elapsed * 0.68) * 0.012;
-      const lagLerp = 1 - Math.exp(-1.9 * dt);
+      const lagLerp = 1 - Math.exp(-2.1 * dt);
 
       breathLagX += (currentX + lateralMicroSway - breathLagX) * lagLerp;
       breathLagY += (currentY + breathCycle - breathLagY) * lagLerp;
+
+      // Apply strictly to the PerspectiveCamera (small heavy translation + subtle yaw/pitch)
+      camera.position.x = breathLagX * 0.55;
+      camera.position.y = -breathLagY * 0.28;
+      camera.rotation.order = "YXZ";
+      camera.rotation.y = -breathLagX * 0.026;
+      camera.rotation.x = -breathLagY * 0.017;
 
       sharedUniforms.uTime.value = elapsed;
       sharedUniforms.uHead.value.set(breathLagX, breathLagY);
@@ -444,7 +334,12 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
       if (!container) return;
       const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
-      sharedUniforms.uViewportAspect.value = w / h;
+      const aspect = w / h;
+      const [panW, panH] = computePanHalf(aspect);
+      sharedUniforms.uViewportAspect.value = aspect;
+      sharedUniforms.uPanHalf.value.set(panW, panH);
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
     window.addEventListener("resize", handleResize);
@@ -454,16 +349,12 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerleave", handlePointerLeave);
       window.removeEventListener("resize", handleResize);
-      quadGeo.dispose();
+      skyGeo.dispose();
+      terrainGeo.dispose();
       skyMat.dispose();
-      farMat.dispose();
-      midMat.dispose();
-      nearMat.dispose();
-      glareMat.dispose();
+      terrainMat.dispose();
       skyTex.dispose();
-      farTex.dispose();
-      midTex.dispose();
-      nearTex.dispose();
+      terrainTex.dispose();
       depthTex.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {
@@ -472,5 +363,16 @@ export const MarsBackdrop: React.FC<MarsBackdropProps> = ({ onHeadMove }) => {
     };
   }, []);
 
-  return <div ref={mountRef} className="mars-canvas-layer" aria-hidden="true" />;
+  return (
+    <div
+      ref={mountRef}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 0,
+        overflow: "hidden",
+        background: "#120c08",
+      }}
+    />
+  );
 };
