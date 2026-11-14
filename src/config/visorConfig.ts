@@ -5,7 +5,7 @@
  */
 
 export const SCENE_CONFIG = {
-  fovDeg: 58,
+  fovDeg: 54,
   nearPlane: 0.03,
   farPlane: 260,
   maxPixelRatio: 2,
@@ -40,8 +40,8 @@ export const SCENE_CONFIG = {
 } as const;
 
 export const MOTION_CONFIG = {
-  /** Base overscan ensuring panorama borders never appear across viewports & look limits */
-  panoramaCoverScale: 1.28,
+  /** Overscan covering shifted eye-level horizon so panorama borders never appear across look limits */
+  panoramaCoverScale: 1.92,
   panoramaAspect: 2400 / 1225,
   /** Angular margin kept between screen ray extremes and panorama image edge (radians) */
   edgeSafetyMarginRad: 0.012,
@@ -97,6 +97,8 @@ export const PANORAMA_CONFIG = {
   farDist: 94.0,
   skyDist: 148.0,
   depthExponent: 0.9,
+  /** Shifts panorama vertically so Martian horizon aligns near eye level instead of pitched down */
+  horizonBias: 0.36,
   meshSegmentsX: 240,
   meshSegmentsY: 120,
   horizonShimmerAmpX: 0.00055,
@@ -108,14 +110,14 @@ export const PANORAMA_CONFIG = {
 } as const;
 
 export const HELMET_GEO_CONFIG = {
-  /** Superellipse outer helmet aperture opening (1:1.42 ratio) framed inside 58° 1.42:1 visor viewport */
+  /** Superellipse outer helmet aperture opening (1:1.42 ratio) framed inside 54° 1.42:1 visor viewport */
   aperture: {
     sealZ: -0.285,
     innerRimZ: -0.225,
     browCheekZ: -0.135,
     backWallZ: 0.08,
-    halfWidth: 0.200,
-    halfHeight: 0.141,
+    halfWidth: 0.192,
+    halfHeight: 0.135,
     superellipsePower: 2.85,
     radialSteps: 84,
     ringFlareOutward: 0.065,
@@ -123,8 +125,8 @@ export const HELMET_GEO_CONFIG = {
   },
   /** Sloped matte ballistic-grey inner cheek cowls */
   cheeks: {
-    offsetX: 0.144,
-    offsetY: -0.082,
+    offsetX: 0.138,
+    offsetY: -0.080,
     offsetZ: -0.196,
     width: 0.168,
     height: 0.062,
@@ -176,8 +178,8 @@ export const HELMET_GEO_CONFIG = {
   },
   /** Interior padding bolsters, braided conduit cables, and machined hex bolts */
   details: {
-    paddingCornerX: 0.168,
-    paddingCornerY: 0.104,
+    paddingCornerX: 0.160,
+    paddingCornerY: 0.098,
     paddingCornerZ: -0.215,
     cableRadius: 0.0046,
     boltRadius: 0.0038,
@@ -246,10 +248,10 @@ export const VISOR_GLASS_CONFIG = {
   },
   /** HUD projection window sized to hug the 1:1.42 inner helmet frame without wide gaps */
   hudWindowUv: {
-    uMin: 0.301,
-    uMax: 0.699,
-    vMin: 0.329,
-    vMax: 0.685,
+    uMin: 0.313,
+    uMax: 0.687,
+    vMin: 0.342,
+    vMax: 0.672,
   },
   /** Intentionally slightly lower offscreen HUD texture resolution so projected light is never crisp */
   hudTexture: {

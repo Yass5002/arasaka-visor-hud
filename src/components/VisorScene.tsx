@@ -137,6 +137,7 @@ export const VisorScene: React.FC = () => {
     const panUniforms = {
       uTime: { value: 0 },
       uPanHalf: { value: new THREE.Vector2(initPanW, initPanH) },
+      uHorizonBias: { value: PANORAMA_CONFIG.horizonBias },
     };
 
     const skyMat = new THREE.ShaderMaterial({
@@ -151,11 +152,16 @@ export const VisorScene: React.FC = () => {
       vertexShader: /* glsl */ `
         uniform vec2 uPanHalf;
         uniform float uSkyDist;
+        uniform float uHorizonBias;
         varying vec2 vUv;
         void main() {
           vUv = uv;
           vec2 p = uv * 2.0 - 1.0;
-          vec3 worldPos = vec3(p.x * uPanHalf.x * uSkyDist, p.y * uPanHalf.y * uSkyDist, -uSkyDist);
+          vec3 worldPos = vec3(
+            p.x * uPanHalf.x * uSkyDist,
+            (p.y - uHorizonBias) * uPanHalf.y * uSkyDist,
+            -uSkyDist
+          );
           gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
         }
       `,
@@ -188,6 +194,7 @@ export const VisorScene: React.FC = () => {
       toneMapped: false,
       vertexShader: /* glsl */ `
         uniform vec2 uPanHalf;
+        uniform float uHorizonBias;
         uniform sampler2D uDepthMap;
         uniform float uNearDist;
         uniform float uFarDist;
@@ -199,7 +206,11 @@ export const VisorScene: React.FC = () => {
           float d = texture2D(uDepthMap, uv).r;
           vec2 p = uv * 2.0 - 1.0;
           float dist = mix(uFarDist, uNearDist, pow(d, uDepthExp));
-          vec3 worldPos = vec3(p.x * uPanHalf.x * dist, p.y * uPanHalf.y * dist, -dist);
+          vec3 worldPos = vec3(
+            p.x * uPanHalf.x * dist,
+            (p.y - uHorizonBias) * uPanHalf.y * dist,
+            -dist
+          );
           gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
         }
       `,
@@ -425,9 +436,19 @@ export const VisorScene: React.FC = () => {
         0.01,
         Math.atan(panW) - Math.atan(tanHalfX) - MOTION_CONFIG.edgeSafetyMarginRad - maxShiftAngular
       );
-      const maxSafePitch = Math.max(
+      const maxSafePitchUp = Math.max(
         0.01,
-        Math.atan(panH) - Math.atan(tanHalfY) - MOTION_CONFIG.edgeSafetyMarginRad - maxShiftAngular
+        Math.atan((1.0 - PANORAMA_CONFIG.horizonBias) * panH) -
+          Math.atan(tanHalfY) -
+          MOTION_CONFIG.edgeSafetyMarginRad -
+          maxShiftAngular
+      );
+      const maxSafePitchDown = Math.max(
+        0.01,
+        Math.atan((1.0 + PANORAMA_CONFIG.horizonBias) * panH) -
+          Math.atan(tanHalfY) -
+          MOTION_CONFIG.edgeSafetyMarginRad -
+          maxShiftAngular
       );
 
       const rawTotalYaw = headYaw + eyeYaw;
@@ -438,8 +459,12 @@ export const VisorScene: React.FC = () => {
       }
 
       const rawTotalPitch = headPitch + eyePitch;
-      if (Math.abs(rawTotalPitch) > maxSafePitch) {
-        const scale = maxSafePitch / Math.abs(rawTotalPitch);
+      if (rawTotalPitch > maxSafePitchUp) {
+        const scale = maxSafePitchUp / rawTotalPitch;
+        headPitch *= scale;
+        eyePitch *= scale;
+      } else if (rawTotalPitch < -maxSafePitchDown) {
+        const scale = -maxSafePitchDown / rawTotalPitch;
         headPitch *= scale;
         eyePitch *= scale;
       }
@@ -454,7 +479,8 @@ export const VisorScene: React.FC = () => {
 
       // Update shaders & live projected HUD canvas
       panUniforms.uTime.value = absElapsed;
-      const pitchNorm = -(headPitch + eyePitch) / Math.max(0.01, maxSafePitch);
+      const pitchNormRef = rawTotalPitch >= 0 ? maxSafePitchUp : maxSafePitchDown;
+      const pitchNorm = -(headPitch + eyePitch) / Math.max(0.01, pitchNormRef);
       hudRenderer.update(now, elapsedSec, pitchNorm);
       visorGlass.updateUniforms(camera.matrixWorldInverse);
 

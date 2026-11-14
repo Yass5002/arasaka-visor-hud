@@ -27,8 +27,8 @@ body,
 }
 
 .visor-frame {
-  /* Locked 170° H × 120° V (~1.42:1) visor viewport at top-left, taking >60% of desktop screen while leaving rest empty */
-  width: min(86vw, calc(88dvh * 170 / 120));
+  /* Full-height locked 170° H × 120° V (~1.42:1) visor viewport at top-left, 0% below, clean right column empty */
+  width: min(80vw, calc(100dvh * 170 / 120));
   aspect-ratio: 170 / 120;
   position: relative;
   overflow: hidden;
