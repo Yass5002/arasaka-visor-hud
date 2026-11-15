@@ -61,14 +61,7 @@ export function App() {
 
   const [liveState, setLiveState] = useState<LiveState>(() => engine.getLiveState());
   const [captionState, setCaptionState] = useState<AssistantCaptionState>(() => assistant.caption);
-  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([
-    {
-      id: "welcome-0",
-      speaker: "ASSISTANT",
-      text: "All suit systems look good, Sir.",
-      missionClock: "Day 1 · 08:00",
-    },
-  ]);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<ClockSpeed>(1);
@@ -144,15 +137,21 @@ export function App() {
       if (cap.text && dedupeKey !== lastLoggedMsgRef.current) {
         lastLoggedMsgRef.current = dedupeKey;
         const st = engine.getLiveState();
-        setChatHistory((prev) => [
-          ...prev.slice(-39),
-          {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            speaker: cap.speaker,
-            text: cap.text,
-            missionClock: formatClock(st.missionDay, st.timeOfDaySec),
-          },
-        ]);
+        setChatHistory((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.speaker === cap.speaker && last.text === cap.text) {
+            return prev;
+          }
+          return [
+            ...prev.slice(-39),
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              speaker: cap.speaker,
+              text: cap.text,
+              missionClock: formatClock(st.missionDay, st.timeOfDaySec),
+            },
+          ];
+        });
       }
     });
 
