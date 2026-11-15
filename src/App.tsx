@@ -75,7 +75,7 @@ export function App() {
   const [selectedVoice, setSelectedVoice] = useState<AzureVoiceId>(voice.selectedVoiceId);
   const [radioFilterEnabled, setRadioFilterEnabled] = useState<boolean>(voice.fx.radioFilterEnabled);
   const [sfxEnabled, setSfxEnabled] = useState<boolean>(voice.fx.sfxEnabled);
-  const [terrainId, setTerrainId] = useState<"mars" | "moon" | "orbit">("mars");
+  const [terrainId] = useState<"mars">("mars");
 
   const [simulationOpen, setSimulationOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -226,7 +226,7 @@ export function App() {
 
   return (
     <div className="screen-shell">
-      {/* Primary 1.417:1 Optical 3D Visor Stage */}
+      {/* Primary Optical 3D Visor Stage */}
       <div className="visor-stage">
         <div className="visor-frame">
           <VisorScene
@@ -238,7 +238,7 @@ export function App() {
         </div>
       </div>
 
-      {/* Compact NASA HDS Mission Console & Crew Assistant Dock */}
+      {/* Mars EVA Mission Console & Crew Assistant Dock */}
       <AssistantBar
         liveState={liveState}
         captionState={captionState}
@@ -305,7 +305,6 @@ export function App() {
         proxyBaseUrl={client.getBaseUrl()}
         sttSupported={voice.supportsSpeechRecognition}
         terrainId={terrainId}
-        onSelectTerrain={(id) => setTerrainId(id)}
       />
 
       {/* Slow Health Trends & Append-Only Event Log Modal */}

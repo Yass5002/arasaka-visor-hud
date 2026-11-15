@@ -20,38 +20,38 @@ const CHART_INDICATORS: Array<{
     id: "dose_cumulative",
     title: "Total Radiation Dose (Estimated)",
     unit: "mSv",
-    color: "#ffb84d",
+    color: "#f5b13d",
     refLine: { value: 600, label: "600 mSv career limit" },
   },
   {
     id: "bone_loss_lumbar",
     title: "Lower Spine Bone Strength (Estimated)",
     unit: "%",
-    color: "#02bfe7",
+    color: "#ece9f1",
   },
   {
     id: "bone_loss_femoral_neck",
     title: "Hip Bone Strength (Estimated)",
     unit: "%",
-    color: "#5fa8ff",
+    color: "#9a95a6",
   },
   {
     id: "immune_index",
     title: "Immune Score (Demo Estimate)",
     unit: "/100",
-    color: "#2e8540",
+    color: "#22f27a",
   },
   {
     id: "cognitive_drift",
     title: "Reaction Speed Change (Measured)",
     unit: "ms",
-    color: "#ff9b4d",
+    color: "#ff5470",
   },
   {
     id: "sans_risk",
     title: "Eye Fluid Risk Index (Estimated)",
     unit: "/100",
-    color: "#a78bfa",
+    color: "#f2154c",
   },
 ];
 
@@ -168,11 +168,11 @@ const MiniTrendChart: React.FC<{
               x2={width - padX}
               y1={mapY(refLine.value)}
               y2={mapY(refLine.value)}
-              stroke="#dd361c"
+              stroke="#ff5470"
               strokeWidth="1"
               strokeDasharray="4 4"
             />
-            <text x={width - padX} y={Math.max(12, mapY(refLine.value) - 4)} textAnchor="end" fill="#ff8f7d" fontSize="10">
+            <text x={width - padX} y={Math.max(12, mapY(refLine.value) - 4)} textAnchor="end" fill="#ff5470" fontSize="10">
               {refLine.label}
             </text>
           </g>
@@ -262,6 +262,7 @@ export const TrendsModal: React.FC<TrendsModalProps> = ({ open, onClose, engine,
               <label className="hds-checkbox-label">
                 <input
                   type="checkbox"
+                  className="hds-switch"
                   checked={includeAllRuns}
                   onChange={(e) => setIncludeAllRuns(e.target.checked)}
                 />

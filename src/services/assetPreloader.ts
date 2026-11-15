@@ -63,7 +63,7 @@ export async function runMissionAssetPreload(
 
   const items: PreloadItemStatus[] = [
     ...assetList.map((a) => ({ id: a.id, label: a.label, status: "pending" as const })),
-    { id: "fonts", label: "NASA HDS Typography & Visor HUD Glyphs", status: "pending" as const },
+    { id: "fonts", label: "HUD Typography & Visor Glyphs", status: "pending" as const },
     { id: "cloud", label: "On-Board AI & Neural Suit Voice Link", status: "pending" as const },
   ];
 

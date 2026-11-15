@@ -22,75 +22,67 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
     return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
   }, []);
 
-  const loadingText = preload.ready
-    ? preload.cloudHealth && !preload.cloudHealth.hasLlmKey
-      ? "Ready to start (offline assistant active)."
-      : "Everything is loaded and ready."
-    : `Loading simulation assets (${Math.round(preload.progressPct)}%)...`;
+  const pct = Math.round(preload.progressPct);
+  const statusState = preload.ready ? "ready" : "loading";
+  const statusLabel = preload.ready
+    ? preload.cloudHealth?.hasLlmKey
+      ? "Ready · Cloud AI online"
+      : "Ready · Offline assistant"
+    : `Loading Mars scene · ${pct}%`;
 
   return (
-    <div className="hds-briefing-backdrop" role="dialog" aria-modal="true" aria-label="Simulation setup">
+    <div className="hds-briefing-backdrop" role="dialog" aria-modal="true" aria-label="Mars EVA launch">
       <div className="hds-briefing-card">
-        <div className="hds-briefing-header">
-          <span className="hds-eyebrow">NASA Horizon Simulation</span>
-          <h1 className="hds-briefing-title">Spacesuit Health Assistant</h1>
-          <p className="hds-briefing-subtitle">
-            See through an astronaut&apos;s helmet on the Moon or Mars while an onboard assistant
-            tracks suit vitals, spots trouble early, and guides you through emergencies one step at a time.
-          </p>
-        </div>
+        <header className="hds-briefing-topbar">
+          <div className="dock-wordmark">MARS EVA</div>
+          <span className={`capri-status ${statusState}`}>
+            <span className="capri-dot" aria-hidden="true" />
+            <span>{preload.ready ? "Ready" : "Loading"}</span>
+          </span>
+        </header>
 
-        <ul className="hds-simple-list">
-          <li>
-            <strong>Live helmet display</strong>
-            <span>Check heart rate, pressure, oxygen, and radiation without looking away.</span>
-          </li>
-          <li>
-            <strong>Calm step-by-step guidance</strong>
-            <span>Get clear instructions during alerts, with backup plans if you get stuck.</span>
-          </li>
-          <li>
-            <strong>Voice or text conversation</strong>
-            <span>Ask questions naturally or confirm completed steps anytime.</span>
-          </li>
-        </ul>
-
-        <div className="hds-loading-panel" aria-live="polite">
-          <div className="hds-loading-row">
-            <span className="hds-loading-label">{loadingText}</span>
-            <span className="hds-loading-pct">{Math.round(preload.progressPct)}%</span>
+        <div className="hds-briefing-body">
+          <div className="hds-briefing-header">
+            <h1 className="hds-briefing-title">Mars Suit Assistant</h1>
+            <p className="hds-briefing-subtitle">
+              Live helmet telemetry and voice-guided hazard recovery at Jezero Crater, Mars.
+            </p>
           </div>
-          <div className="hds-progress-track">
-            <div
-              className={`hds-progress-fill ${preload.ready ? "ready" : ""}`}
-              style={{ width: `${Math.min(100, Math.max(4, preload.progressPct))}%` }}
-            />
+
+          <div className="hds-loading-panel" aria-live="polite">
+            <div className="hds-loading-row">
+              <span className="hds-loading-label">{statusLabel}</span>
+              <span className="hds-loading-pct">{pct}%</span>
+            </div>
+            <div className="hds-progress-track">
+              <div
+                className={`hds-progress-fill ${preload.ready ? "ready" : ""}`}
+                style={{ width: `${Math.min(100, Math.max(3, pct))}%` }}
+              />
+            </div>
           </div>
+
+          {sttSupported && (
+            <label className="hds-launch-toggle">
+              <span>Start with microphone listening on</span>
+              <input
+                type="checkbox"
+                className="hds-switch"
+                checked={openMicOnLaunch}
+                onChange={(e) => onChangeOpenMicOnLaunch(e.target.checked)}
+              />
+            </label>
+          )}
+
+          <button
+            type="button"
+            className="hds-btn hds-btn-primary hds-launch-btn"
+            disabled={!preload.ready}
+            onClick={onLaunch}
+          >
+            {preload.ready ? "Enter Mars EVA" : `Loading ${pct}%...`}
+          </button>
         </div>
-
-        {sttSupported && (
-          <label className="hds-launch-toggle">
-            <input
-              type="checkbox"
-              checked={openMicOnLaunch}
-              onChange={(e) => onChangeOpenMicOnLaunch(e.target.checked)}
-            />
-            <span>Turn microphone on automatically when starting</span>
-          </label>
-        )}
-
-        <button
-          type="button"
-          className="hds-launch-btn"
-          disabled={!preload.ready}
-          onClick={onLaunch}
-        >
-          {preload.ready ? "Start Simulation" : "Loading..."}
-        </button>
-
-        <p className="hds-briefing-note">
-          Simulated training environment. Audio effects and spoken voice work best with sound on.
-        </p>
       </div>
     </div>
   );

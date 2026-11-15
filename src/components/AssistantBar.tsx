@@ -75,26 +75,6 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
   const activeProtocol = liveState.activeProtocol;
   const queuedCount = liveState.pausedProtocols?.length ?? 0;
 
-  const isEva = liveState.context.activity === "eva";
-  const pressure = isEva
-    ? liveState.indicators.suit_pressure.value
-    : liveState.indicators.cabin_pressure.value;
-
-  const quickPrompts =
-    primaryAlert || activeProtocol
-      ? [
-          "I can't make it back in time",
-          "Why is this happening?",
-          "What else needs attention?",
-          "Check my radiation",
-        ]
-      : [
-          "How am I doing?",
-          "Check my radiation",
-          "How is my heart rate?",
-          "Check oxygen and air",
-        ];
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = input.trim();
@@ -109,15 +89,16 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
       <header className="dock-header">
         <div className="dock-brand-block">
           <div className="dock-title-row">
-            <h1 className="dock-title">Suit Assistant</h1>
-            <span className={`status-pill ${classTone(liveState.overallClass)}`}>
-              {classBadgeText(liveState.overallClass)}
+            <h1 className="dock-wordmark">SUIT ASSISTANT</h1>
+            <span className={`capri-status ${classTone(liveState.overallClass)}`}>
+              <span className="capri-dot" aria-hidden="true" />
+              <span>{classBadgeText(liveState.overallClass)}</span>
             </span>
           </div>
           <div className="dock-meta-row">
             <span className="hds-num">{formatMissionClock(liveState.missionDay, liveState.timeOfDaySec)}</span>
             <span className="dock-sep" aria-hidden="true">·</span>
-            <span>{ACTIVITY_LABELS[liveState.context.activity] ?? "Outside EVA"}</span>
+            <span>Mars · {ACTIVITY_LABELS[liveState.context.activity] ?? "Outside EVA"}</span>
           </div>
         </div>
 
@@ -136,7 +117,7 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
             onClick={onToggleVoice}
             title="Turn spoken voice replies on or off"
           >
-            {captionState.voiceConnected ? "Voice On" : "Voice Off"}
+            {captionState.voiceConnected ? "Voice" : "Muted"}
           </button>
           {captionState.isSpeaking && (
             <button
@@ -144,7 +125,7 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
               className="hds-btn hds-btn-sm hds-btn-warn"
               onClick={onStopSpeaking}
             >
-              Mute
+              Stop
             </button>
           )}
         </div>
@@ -229,34 +210,6 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
         </section>
       )}
 
-      {/* Compact live readings strip */}
-      <section className="hds-vitals-grid" aria-label="Key readings">
-        <div className="hds-vital-tile">
-          <span className="hds-vital-label">Heart rate</span>
-          <strong className="hds-vital-val hds-num">
-            {Math.round(liveState.indicators.heart_rate.value)} <span>bpm</span>
-          </strong>
-        </div>
-        <div className="hds-vital-tile">
-          <span className="hds-vital-label">{isEva ? "Suit pressure" : "Cabin pressure"}</span>
-          <strong className="hds-vital-val hds-num">
-            {pressure.toFixed(1)} <span>kPa</span>
-          </strong>
-        </div>
-        <div className="hds-vital-tile">
-          <span className="hds-vital-label">Helmet O2</span>
-          <strong className="hds-vital-val hds-num">
-            {liveState.indicators.pio2.value.toFixed(0)} <span>mmHg</span>
-          </strong>
-        </div>
-        <div className="hds-vital-tile">
-          <span className="hds-vital-label">Radiation</span>
-          <strong className="hds-vital-val hds-num">
-            {liveState.indicators.dose_rate.value.toFixed(2)} <span>mSv/d</span>
-          </strong>
-        </div>
-      </section>
-
       {/* Conversation feed */}
       <section className="hds-chat-card" aria-label="Conversation">
         <div className="hds-chat-scroll">
@@ -285,20 +238,6 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
           )}
         </div>
 
-        {/* Quick question chips */}
-        <div className="hds-quick-chips">
-          {quickPrompts.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className="chip-btn"
-              onClick={() => onAsk(prompt)}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-
         {/* Input box */}
         <form className="hds-ask-form" onSubmit={handleSubmit}>
           <input
@@ -318,16 +257,16 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
       {/* Panel navigation */}
       <nav className="hds-nav-grid" aria-label="Simulation panels">
         <button type="button" className="hds-nav-btn" onClick={onOpenSimulation}>
-          Events &amp; Controls
+          Events
         </button>
         <button type="button" className="hds-nav-btn" onClick={onOpenTrends}>
-          Health Trends
+          Trends
         </button>
         <button type="button" className="hds-nav-btn" onClick={onOpenSources}>
-          Safety Guide
+          Guide
         </button>
         <button type="button" className="hds-nav-btn" onClick={onOpenSettings}>
-          Audio &amp; Setup
+          Setup
         </button>
       </nav>
     </aside>

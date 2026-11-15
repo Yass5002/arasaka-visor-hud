@@ -22,8 +22,7 @@ export interface SettingsModalProps {
   onProbeCloud: () => void;
   proxyBaseUrl: string;
   sttSupported: boolean;
-  terrainId: "mars" | "moon" | "orbit";
-  onSelectTerrain: (id: "mars" | "moon" | "orbit") => void;
+  terrainId: "mars";
 }
 
 const MISSION_DURATIONS: Array<{ days: 180 | 1000; label: string }> = [
@@ -47,9 +46,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleSfx,
   cloudStatus,
   onProbeCloud,
+  proxyBaseUrl: _proxyBaseUrl,
   sttSupported,
-  terrainId,
-  onSelectTerrain,
+  terrainId: _terrainId,
 }) => {
   useEffect(() => {
     if (!open) return;
@@ -96,26 +95,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="modal-body">
           {/* Voice & Audio */}
           <section className="hds-section">
-            <h3 className="hds-section-title">Voice &amp; sound</h3>
+            <h3 className="hds-section-title">Voice &amp; audio</h3>
 
-            <div className="hds-setting-row">
+            <label className="hds-setting-row">
               <div>
                 <strong>Spoken voice replies</strong>
-                <p className="hds-body-sm hds-muted">Have the assistant read alerts and answers out loud.</p>
+                <p className="hds-body-sm hds-muted">Read alerts and answers aloud in helmet.</p>
               </div>
-              <button
-                type="button"
-                className={`hds-btn hds-btn-sm ${voiceConnected ? "active" : ""}`}
-                onClick={() => onToggleVoice(!voiceConnected)}
-              >
-                {voiceConnected ? "On" : "Off"}
-              </button>
-            </div>
+              <input
+                type="checkbox"
+                className="hds-switch"
+                checked={voiceConnected}
+                onChange={(e) => onToggleVoice(e.target.checked)}
+              />
+            </label>
 
             <div className="hds-setting-row">
               <div>
                 <strong>Assistant voice</strong>
-                <p className="hds-body-sm hds-muted">Choose the voice used for spoken guidance.</p>
+                <p className="hds-body-sm hds-muted">Voice profile for spoken replies.</p>
               </div>
               <div className="hds-inline-controls">
                 <select
@@ -131,76 +129,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   ))}
                 </select>
                 <button type="button" className="hds-btn hds-btn-sm" onClick={onTestVoice}>
-                  Test voice
+                  Test
                 </button>
               </div>
             </div>
 
-            <div className="hds-setting-row">
+            <label className="hds-setting-row">
               <div>
-                <strong>Spacesuit headset sound</strong>
-                <p className="hds-body-sm hds-muted">Add subtle radio filtering so voice sounds like a real suit link.</p>
+                <strong>Suit radio filter</strong>
+                <p className="hds-body-sm hds-muted">Apply light headset filtering instead of clean dry audio.</p>
               </div>
-              <button
-                type="button"
-                className={`hds-btn hds-btn-sm ${radioFilterEnabled ? "active" : ""}`}
-                onClick={() => onToggleRadioFilter(!radioFilterEnabled)}
-              >
-                {radioFilterEnabled ? "On" : "Off"}
-              </button>
-            </div>
+              <input
+                type="checkbox"
+                className="hds-switch"
+                checked={radioFilterEnabled}
+                onChange={(e) => onToggleRadioFilter(e.target.checked)}
+              />
+            </label>
 
-            <div className="hds-setting-row">
+            <label className="hds-setting-row">
               <div>
-                <strong>Alert tones</strong>
-                <p className="hds-body-sm hds-muted">Play short audio chimes when new warnings appear or steps complete.</p>
+                <strong>Alert chimes</strong>
+                <p className="hds-body-sm hds-muted">Soft chime when warnings start or steps complete.</p>
               </div>
-              <button
-                type="button"
-                className={`hds-btn hds-btn-sm ${sfxEnabled ? "active" : ""}`}
-                onClick={() => onToggleSfx(!sfxEnabled)}
-              >
-                {sfxEnabled ? "On" : "Off"}
-              </button>
-            </div>
+              <input
+                type="checkbox"
+                className="hds-switch"
+                checked={sfxEnabled}
+                onChange={(e) => onToggleSfx(e.target.checked)}
+              />
+            </label>
           </section>
 
           {/* AI & Microphone status */}
           <section className="hds-section">
-            <h3 className="hds-section-title">Assistant connection</h3>
+            <h3 className="hds-section-title">Connection</h3>
             <div className="hds-setting-row">
               <div>
-                <strong>Voice AI service</strong>
+                <strong>Voice AI link</strong>
                 <p className="hds-body-sm hds-muted">
                   Status: <span className={`status-inline ${cloudStatus}`}>{cloudLabel}</span>
                   {" · "}
-                  Microphone input: {sttSupported ? "Supported in this browser" : "Not supported here (use text)"}
+                  Mic: {sttSupported ? "Supported" : "Unsupported (text input)"}
                 </p>
               </div>
               <button type="button" className="hds-btn hds-btn-sm" onClick={onProbeCloud}>
-                Check connection
+                Check
               </button>
             </div>
           </section>
 
-          {/* Scene & Astronaut Profile */}
+          {/* Mission & Astronaut Profile */}
           <section className="hds-section">
-            <h3 className="hds-section-title">Mission &amp; astronaut profile</h3>
+            <h3 className="hds-section-title">Mars mission &amp; crew profile</h3>
 
-            <div className="hds-setting-block">
-              <span className="hds-field-label">Environment scene</span>
-              <div className="chip-row">
-                {TERRAIN_SOURCES.map((tr) => (
-                  <button
-                    key={tr.id}
-                    type="button"
-                    className={`chip-btn ${terrainId === tr.id ? "active" : ""}`}
-                    onClick={() => onSelectTerrain(tr.id)}
-                  >
-                    {tr.label}
-                  </button>
-                ))}
+            <div className="hds-setting-row">
+              <div>
+                <strong>Environment</strong>
+                <p className="hds-body-sm hds-muted">{TERRAIN_SOURCES[0].label}</p>
               </div>
+              <span className="hds-pill">Mars</span>
             </div>
 
             <div className="hds-setting-block">

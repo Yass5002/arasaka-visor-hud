@@ -793,23 +793,9 @@ export const MASTER_REFERENCES = [
 export const TERRAIN_SOURCES = [
   {
     id: "mars",
-    label: "Mars: Jezero Crater (Perseverance)",
+    label: "Mars — Jezero Crater (Perseverance)",
     credit: "NASA/JPL-Caltech/ASU/MSSS",
     licence: "Public Domain (U.S. Government Work, no NASA endorsement implied)",
     available: true,
-  },
-  {
-    id: "moon",
-    label: "Moon: Artemis South Pole",
-    credit: "NASA / LRO / Artemis",
-    licence: "Coming soon",
-    available: false,
-  },
-  {
-    id: "orbit",
-    label: "Deep Space / Mars Orbit",
-    credit: "NASA Earth Observatory / JSC",
-    licence: "Coming soon",
-    available: false,
   },
 ] as const;

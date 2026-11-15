@@ -49,26 +49,38 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({ open, onClose }) => 
             </p>
             <div className="hds-level-grid">
               <div className="hds-level-item">
-                <span className="status-pill c0">Normal</span>
+                <span className="capri-status c0">
+                  <span className="capri-dot" aria-hidden="true" />
+                  <span>Normal</span>
+                </span>
                 <p>Suit and body readings are in a safe range.</p>
               </div>
               <div className="hds-level-item">
-                <span className="status-pill c3">Watch</span>
+                <span className="capri-status c3">
+                  <span className="capri-dot" aria-hidden="true" />
+                  <span>Watch</span>
+                </span>
                 <p>Something is starting to drift and should be watched.</p>
               </div>
               <div className="hds-level-item">
-                <span className="status-pill c2">Warning</span>
+                <span className="capri-status c2">
+                  <span className="capri-dot" aria-hidden="true" />
+                  <span>Warning</span>
+                </span>
                 <p>A limit was crossed. Action is needed soon.</p>
               </div>
               <div className="hds-level-item">
-                <span className="status-pill c1">Emergency</span>
+                <span className="capri-status c1">
+                  <span className="capri-dot" aria-hidden="true" />
+                  <span>Emergency</span>
+                </span>
                 <p>Immediate safety risk. Follow the step shown right away.</p>
               </div>
             </div>
           </section>
 
           <section className="hds-section">
-            <h3 className="hds-section-title">Helmet scene locations</h3>
+            <h3 className="hds-section-title">Mars surface panorama</h3>
             <div className="hds-ref-list">
               {TERRAIN_SOURCES.map((tr) => (
                 <div key={tr.id} className="hds-ref-item">

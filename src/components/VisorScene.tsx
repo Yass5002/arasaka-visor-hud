@@ -10,9 +10,22 @@ import { HelmetDofComposite } from "../three/HelmetDofComposite";
 import { HudCanvasRenderer } from "../hud/HudCanvasRenderer";
 import { PRELOADED_IMAGES } from "../services/assetPreloader";
 
-function computePanHalf(viewportAspect: number): [number, number] {
+const REFERENCE_VISOR_ASPECT = 170 / 120;
+
+function computeAdaptiveFovDeg(viewportAspect: number): number {
+  const safeAspect = Math.max(0.25, viewportAspect);
+  if (safeAspect >= REFERENCE_VISOR_ASPECT) {
+    return SCENE_CONFIG.fovDeg;
+  }
+  // Widen vertical FOV slightly on narrower panes so horizontal helmet aperture & HUD stay unclipped
+  const baseTanHalfY = Math.tan(THREE.MathUtils.degToRad(SCENE_CONFIG.fovDeg * 0.5));
+  const reqTanHalfY = (baseTanHalfY * REFERENCE_VISOR_ASPECT) / safeAspect;
+  return THREE.MathUtils.radToDeg(2 * Math.atan(reqTanHalfY));
+}
+
+function computePanHalf(viewportAspect: number, fovDeg: number): [number, number] {
   const { panoramaAspect, panoramaCoverScale } = MOTION_CONFIG;
-  const tanHalfY = Math.tan(THREE.MathUtils.degToRad(SCENE_CONFIG.fovDeg * 0.5));
+  const tanHalfY = Math.tan(THREE.MathUtils.degToRad(fovDeg * 0.5));
   const tanHalfX = tanHalfY * viewportAspect;
   if (viewportAspect <= panoramaAspect) {
     const h = tanHalfY * panoramaCoverScale;
@@ -42,7 +55,7 @@ export interface VisorSceneProps {
   liveStateRef?: React.MutableRefObject<LiveState | null>;
   captionRef?: React.MutableRefObject<AssistantCaptionState | null>;
   sampleAudioLevels?: () => { speech: number; mic: number };
-  terrainId?: "mars" | "moon" | "orbit";
+  terrainId?: "mars";
 }
 
 export const VisorScene: React.FC<VisorSceneProps> = ({
@@ -74,8 +87,9 @@ export const VisorScene: React.FC<VisorSceneProps> = ({
 
     const scene = new THREE.Scene();
 
+    const initFovDeg = computeAdaptiveFovDeg(initAspect);
     const camera = new THREE.PerspectiveCamera(
-      SCENE_CONFIG.fovDeg,
+      initFovDeg,
       initAspect,
       SCENE_CONFIG.nearPlane,
       SCENE_CONFIG.farPlane
@@ -138,7 +152,7 @@ export const VisorScene: React.FC<VisorSceneProps> = ({
     const terrainTex = loadOrCachedTex(`${base}mars/mars-terrain.webp`);
     const depthTex = loadOrCachedTex(`${base}mars/mars-depth.png`);
 
-    const [initPanW, initPanH] = computePanHalf(initAspect);
+    const [initPanW, initPanH] = computePanHalf(initAspect, initFovDeg);
     const panUniforms = {
       uTime: { value: 0 },
       uPanHalf: { value: new THREE.Vector2(initPanW, initPanH) },
@@ -419,7 +433,7 @@ export const VisorScene: React.FC<VisorSceneProps> = ({
 
       // Strict angular clamp against live panorama coverage so Mars borders NEVER appear
       const [panW, panH] = [panUniforms.uPanHalf.value.x, panUniforms.uPanHalf.value.y];
-      const tanHalfY = Math.tan(THREE.MathUtils.degToRad(SCENE_CONFIG.fovDeg * 0.5));
+      const tanHalfY = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
       const tanHalfX = tanHalfY * currentAspect;
       const maxShiftAngular =
         Math.hypot(MOTION_CONFIG.eye.maxShiftX, MOTION_CONFIG.eye.maxShiftY) /
@@ -521,8 +535,10 @@ export const VisorScene: React.FC<VisorSceneProps> = ({
       const h = container.clientHeight || window.innerHeight;
       if (w < 4 || h < 4) return;
       currentAspect = w / h;
-      const [panW, panH] = computePanHalf(currentAspect);
+      const nextFov = computeAdaptiveFovDeg(currentAspect);
+      const [panW, panH] = computePanHalf(currentAspect, nextFov);
       panUniforms.uPanHalf.value.set(panW, panH);
+      camera.fov = nextFov;
       camera.aspect = currentAspect;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
