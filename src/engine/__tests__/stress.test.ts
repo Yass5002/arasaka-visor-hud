@@ -860,9 +860,12 @@ describe("Stress Suite (>=110 programmatic stress tests across scenarios, concur
       assertCleanOutput(emittedTexts[0]);
     });
 
-    it("G-audio-defaults: natural voice default (radioFilterEnabled=false) and quiet comms hooks", () => {
+    it("G-audio-defaults: Emma default voice, clean audio path (radioFilterEnabled=false), and quiet comms hooks", () => {
       const client = new AzureProxyClient("http://127.0.0.1:0");
       const voice = new VoiceService(client);
+      expect(voice.selectedVoiceId).toBe("en-US-EmmaMultilingualNeural");
+      expect(voice.voiceName).toBe("en-US-EmmaMultilingualNeural");
+      expect(voice.gender).toBe("female");
       expect(voice.fx.radioFilterEnabled).toBe(false);
       // Must execute cleanly without Web Audio / getUserMedia dependency in node
       expect(() => {

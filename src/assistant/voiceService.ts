@@ -11,14 +11,14 @@ export type AzureVoiceId =
 
 export const AZURE_VOICES: Record<VoiceGender, AzureVoiceId> = {
   male: "en-US-AndrewMultilingualNeural",
-  female: "en-US-AvaMultilingualNeural",
+  female: "en-US-EmmaMultilingualNeural",
 };
 
 export const AZURE_VOICE_OPTIONS: ReadonlyArray<{ id: AzureVoiceId; label: string }> = [
+  { id: "en-US-EmmaMultilingualNeural", label: "Emma (Clear Mission Voice, Female)" },
   { id: "en-US-AndrewMultilingualNeural", label: "Andrew (Calm Suit Voice, Male)" },
   { id: "en-US-AvaMultilingualNeural", label: "Ava (Warm Mission Voice, Female)" },
   { id: "en-US-BrianMultilingualNeural", label: "Brian (Flight Controller, Male)" },
-  { id: "en-US-EmmaMultilingualNeural", label: "Emma (Clear Mission Voice, Female)" },
 ];
 
 interface SpeechRecognitionAlternativeLike {
@@ -69,8 +69,8 @@ export class VoiceService {
 
   /** Starts false before user audio unlock gesture; App sets true on EVA Suit entry */
   public enabled = false;
-  public gender: VoiceGender = "male";
-  public selectedVoiceId: AzureVoiceId = "en-US-AndrewMultilingualNeural";
+  public gender: VoiceGender = "female";
+  public selectedVoiceId: AzureVoiceId = "en-US-EmmaMultilingualNeural";
   public autoSpeakAlerts = true;
 
   private activeRecognition: SpeechRecognitionLike | null = null;

@@ -124,7 +124,7 @@ export default {
 
       const {
         text,
-        voice = "en-US-AndrewMultilingualNeural",
+        voice = "en-US-EmmaMultilingualNeural",
         urgency = "nominal",
       } = await request.json<{
         text: string;
