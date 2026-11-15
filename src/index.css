@@ -114,6 +114,7 @@ body,
 
 .dock-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -146,7 +147,20 @@ body,
 
 .dock-nav-btns {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
+}
+
+.hds-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  color: var(--hds-ink-muted);
+}
+
+.hds-icon-btn:hover:not(:disabled) {
+  color: var(--hds-cyan);
 }
 
 .hds-btn {
@@ -185,40 +199,6 @@ body,
   background: rgba(221, 54, 28, 0.18);
   border-color: var(--hds-red);
   color: #ffd0c8;
-}
-
-/* Edge-mounted Settings Dashboard Icon (SIM-CTL-006) */
-.edge-settings-trigger {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 40;
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  background: rgba(14, 20, 31, 0.65);
-  border: 1px solid rgba(150, 194, 255, 0.25);
-  color: var(--hds-ink-muted);
-  cursor: pointer;
-  backdrop-filter: blur(6px);
-  transition: opacity 260ms ease, color 150ms ease, border-color 150ms ease, background-color 150ms ease;
-}
-
-.edge-settings-trigger.idle-faded {
-  opacity: 0.28;
-}
-
-.edge-settings-trigger:hover,
-.edge-settings-trigger:focus-visible,
-.edge-settings-trigger.active {
-  opacity: 1;
-  color: var(--hds-cyan);
-  border-color: var(--hds-cyan);
-  background: rgba(11, 61, 145, 0.72);
-  outline: none;
 }
 
 /* Quick Status & Clock Card inside Dock */

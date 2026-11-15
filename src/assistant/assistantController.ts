@@ -11,6 +11,7 @@ export interface AssistantCaptionState {
   alertClass: 0 | 1 | 2 | 3;
   isBusy: boolean;
   isListening: boolean;
+  isSpeaking?: boolean;
   voiceConnected: boolean;
   cloudStatus: "ready" | "fallback" | "checking";
 }
@@ -161,6 +162,7 @@ export class AssistantController {
     alertClass: 0,
     isBusy: false,
     isListening: false,
+    isSpeaking: false,
     voiceConnected: false,
     cloudStatus: "checking",
   };
@@ -173,6 +175,9 @@ export class AssistantController {
     this.bridge = bridge;
     this.client = client;
     this.voice = voice;
+    this.voice.setSpeakingListener((speaking) => {
+      this.emitCaption({ isSpeaking: speaking });
+    });
   }
 
   public subscribe(fn: (cap: AssistantCaptionState) => void): () => void {
@@ -198,7 +203,11 @@ export class AssistantController {
 
   public setVoiceConnected(connected: boolean): void {
     this.voice.enabled = connected;
-    if (!connected) this.voice.stopSpeaking();
+    if (connected) {
+      this.voice.unlockAudio();
+    } else {
+      this.voice.stopSpeaking();
+    }
     this.emitCaption({ voiceConnected: connected });
   }
 
@@ -207,6 +216,11 @@ export class AssistantController {
       this.voice.stopListening();
       this.emitCaption({ isListening: false });
       return;
+    }
+    this.voice.unlockAudio();
+    // Using the Mic implies conversational voice exchange — enable spoken replies automatically
+    if (!this.voice.enabled) {
+      this.setVoiceConnected(true);
     }
     this.voice.startListening(
       (transcript) => {
@@ -288,6 +302,10 @@ export class AssistantController {
   public async ask(question: string): Promise<string> {
     const trimmed = question.trim();
     if (!trimmed) return "";
+
+    if (this.voice.enabled) {
+      this.voice.unlockAudio();
+    }
 
     const live = this.bridge.get_state();
     this.emitCaption({
