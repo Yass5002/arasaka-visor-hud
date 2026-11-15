@@ -28,6 +28,7 @@ import type {
 
 export class CrewHealthEngine {
   public readonly store: EngineStore;
+  public onStepMitigation?: (protocolId: ProtocolId, stepIndex: number) => void;
   private currentT = 0;
   private listeners: Set<(state: LiveState) => void> = new Set();
   private cachedLiveState: LiveState;
@@ -179,8 +180,28 @@ export class CrewHealthEngine {
 
     updateModelledIndicators(this.store, this.currentT);
     evaluateDetectorsAndAlerts(this.store, this.currentT);
+    this.pruneResolvedAutoProtocols();
     if (notifyNow) {
       this.notify();
+    }
+  }
+
+  private pruneResolvedAutoProtocols(): void {
+    const activeProtoIds = new Set(
+      this.store.activeAlerts.map((a) => a.protocolId).filter((p): p is ProtocolId => Boolean(p))
+    );
+    this.store.pausedProtocols = this.store.pausedProtocols.filter(
+      (p) => !p.autoTriggered || p.completedSteps.length > 0 || activeProtoIds.has(p.id)
+    );
+    if (
+      this.store.activeProtocol &&
+      !this.store.activeProtocol.completed &&
+      this.store.activeProtocol.autoTriggered &&
+      this.store.activeProtocol.completedSteps.length === 0 &&
+      !activeProtoIds.has(this.store.activeProtocol.id)
+    ) {
+      const next = this.store.pausedProtocols.shift() ?? null;
+      this.store.activeProtocol = next;
     }
   }
 
@@ -224,7 +245,7 @@ export class CrewHealthEngine {
   // PROTOCOL & ALERT ACTIONS (called via AssistantEngineBridge or UI confirm)
   // =========================================================================
 
-  public startProtocol(protocolId: ProtocolId): ActiveProtocolState {
+  public startProtocol(protocolId: ProtocolId, autoTriggered = false): ActiveProtocolState {
     const current = this.store.activeProtocol;
     if (current && current.id === protocolId && !current.completed) {
       return current;
@@ -255,10 +276,35 @@ export class CrewHealthEngine {
       currentStep: def.steps[0],
       completedSteps: [],
       completed: false,
+      autoTriggered,
     };
     this.store.activeProtocol = state;
     this.notify();
     return state;
+  }
+
+  public queueProtocol(protocolId: ProtocolId, autoTriggered = false): void {
+    const cur = this.store.activeProtocol;
+    if (!cur || cur.completed) {
+      this.startProtocol(protocolId, autoTriggered);
+      return;
+    }
+    if (cur.id === protocolId || this.store.pausedProtocols.some((p) => p.id === protocolId)) {
+      return;
+    }
+    const def = PROTOCOLS[protocolId];
+    this.store.pausedProtocols.push({
+      id: protocolId,
+      name: def.name,
+      startedAt: this.currentT,
+      currentStepIndex: 0,
+      totalSteps: def.steps.length,
+      currentStep: def.steps[0],
+      completedSteps: [],
+      completed: false,
+      autoTriggered,
+    });
+    this.notify();
   }
 
   public completeProtocolStep(protocolId: ProtocolId, stepIndex: number): ActiveProtocolState | null {
@@ -278,7 +324,14 @@ export class CrewHealthEngine {
     const nextIdx = stepIndex + 1;
     if (nextIdx >= def.steps.length) {
       active.completed = true;
-      // Resolve associated alerts when protocol completes (ENG-001 6.4)
+      if (protocolId === "air_check") {
+        // Flush stale pre-scrubber ppCO2 samples out of the 1-hr rolling average window
+        this.store.rollingWindowFloorByIndicator.ppco2 = this.currentT;
+      }
+      // Run physical mitigation cleanly BEFORE updating alert resolution or notifying listeners
+      this.onStepMitigation?.(protocolId, stepIndex);
+
+      // Resolve any alerts bound to this finished protocol
       for (const alr of this.store.activeAlerts) {
         if (alr.protocolId === protocolId) {
           alr.state = "resolved";
@@ -291,7 +344,8 @@ export class CrewHealthEngine {
       }
       this.store.activeAlerts = this.store.activeAlerts.filter((a) => a.state !== "resolved");
 
-      // Automatically resume next paused protocol on the preemption stack if one exists
+      // Automatically resume next valid paused protocol on the preemption stack if one exists
+      this.pruneResolvedAutoProtocols();
       const nextQueued = this.store.pausedProtocols.shift();
       if (nextQueued) {
         this.store.activeProtocol = nextQueued;
@@ -299,6 +353,7 @@ export class CrewHealthEngine {
     } else {
       active.currentStepIndex = nextIdx;
       active.currentStep = def.steps[nextIdx];
+      this.onStepMitigation?.(protocolId, stepIndex);
     }
 
     this.notify();

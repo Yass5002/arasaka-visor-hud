@@ -1,10 +1,8 @@
 import type { AssistantEngineBridge } from "../engine/assistantApi";
-import { ENGINE_LIMITS, PROTOCOLS } from "../engine/config";
+import { ENGINE_LIMITS } from "../engine/config";
 import type { AlertObject, IndicatorId, LiveState, ProtocolId } from "../engine/types";
 import { AzureProxyClient, type ChatMessage, type ChatToolSpec } from "./azureClient";
 import type { SpeechUrgency, VoiceService } from "./voiceService";
-
-export type CrewCallsign = "Sir" | "Commander";
 
 export interface AssistantCaptionState {
   speaker: "ASSISTANT" | "CREW";
@@ -17,24 +15,21 @@ export interface AssistantCaptionState {
   isSpeaking?: boolean;
   voiceConnected: boolean;
   cloudStatus: "ready" | "fallback" | "checking";
-  callsign?: CrewCallsign;
   escalationStage?: 0 | 1 | 2 | 3;
   unresponsiveEscalated?: boolean;
 }
 
-function buildSystemPrompt(callsign: CrewCallsign): string {
-  return `You are the Arasaka EVA Suit Crew Health Assistant speaking directly into an astronaut's Mars surface helmet visor (Jezero Crater, outside habitat; ~12 min Earth light-time delay; no evacuation).
-PERSONA & TONE:
-- Address the astronaut concisely and respectfully as "${callsign}" (similar to a calm, authoritative spacecraft AI — composed under normal conditions, focused and decisive during emergencies).
-- Speak naturally for two-way live helmet radio (short punchy sentences, at most 2-3 sentences per reply).
-STRICT MEDICAL & TELEMETRY RULES (ARASAKA-ENG-001 & ARASAKA-SIM-001):
-1. NEVER diagnose. Use "consistent with", "indicates risk of", or observational phrasing—NEVER "you have".
-2. ALWAYS call the provided tools to read live state, history, or alerts. Never invent numbers.
-3. For every value you cite, state whether it is measured (sensed), estimated (modelled), or self-reported, and give the mission day/time.
-4. When guiding a protocol, state the hazard briefly and give ONE step at a time, then wait for confirmation from ${callsign}.
-5. Keep slow modelled indices (bone loss, immune_index, cognitive_drift, sans_risk) out of visor alerts unless specifically asked.
-6. When escalation criteria are met (or unresponsive crew / persistent serious anomalies), advise contacting Habitat / Flight Surgeon and note the ~12 minute one-way light-time reply delay.`;
-}
+const SYSTEM_PROMPT = `You are the Arasaka EVA Suit Crew Health Assistant speaking over live helmet radio to an astronaut on the Mars surface (~12 min Earth reply delay; no evacuation).
+PERSONA & COMMUNICATION STYLE:
+- Address the astronaut naturally and respectfully as "Sir" (like JARVIS / NASA CAPCOM: calm, razor-sharp, zero fluff).
+- COMMUNICATE, DO NOT LECTURE. Put the required action FIRST, keep responses to 1-2 short direct sentences (under ~25 words whenever an alert is active). Never recite textbook background stats unless Sir explicitly asks for detailed numbers or history.
+STRICT SAFETY & TELEMETRY RULES (ARASAKA-ENG-001):
+1. NEVER diagnose. Say "readings are consistent with" or "indicates risk of"—NEVER say "you have".
+2. ALWAYS call tools to read live state, alerts, or history. Never invent numbers.
+3. State whether cited numbers are measured (sensed) or estimated (modelled) with mission clock when quoting telemetry.
+4. Guide ONE step at a time and wait for Sir to confirm.
+5. Keep slow modelled indices (bone loss, immune_index, cognitive_drift, sans_risk) off visor alerts unless asked.
+6. Only advise Flight Surgeon contact (~12 min delay) when serious escalation criteria apply.`;
 
 const ASSISTANT_TOOLS: ChatToolSpec[] = [
   {
@@ -42,7 +37,7 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
     function: {
       name: "get_state",
       description:
-        "Get the current live state: mission day/time, EVA context, primary indicators, active alerts, active protocol, and paused protocol queue.",
+        "Get current live telemetry, EVA context, active alerts, active protocol, and queued paused protocols.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -50,7 +45,7 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
     type: "function",
     function: {
       name: "summarise",
-      description: "Summarise an indicator over a recent time window in minutes (min, max, mean, trend).",
+      description: "Summarise an indicator over a recent time window in minutes.",
       parameters: {
         type: "object",
         properties: {
@@ -65,7 +60,7 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
     type: "function",
     function: {
       name: "get_alerts",
-      description: "List currently active alerts ranked by class and urgency.",
+      description: "List active alerts ranked by class and urgency.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -73,7 +68,7 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
     type: "function",
     function: {
       name: "explain",
-      description: "Get the full recorded evidence chain for an alert ID.",
+      description: "Get the recorded evidence chain for an alert ID.",
       parameters: {
         type: "object",
         properties: { alertId: { type: "string" } },
@@ -170,12 +165,12 @@ export class AssistantController {
   public readonly client: AzureProxyClient;
   public readonly voice: VoiceService;
 
-  public callsign: CrewCallsign = "Sir";
-  public onStepMitigation?: (protocolId: ProtocolId, stepIndex: number) => void;
-
-  private history: ChatMessage[] = [{ role: "system", content: buildSystemPrompt("Sir") }];
+  private history: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }];
   private lastAnnouncedAlertIds = new Set<string>();
   private captionListeners = new Set<(cap: AssistantCaptionState) => void>();
+
+  // Prevents step-completion synchronous notify() from causing duplicate alert speech
+  private suppressAlertSync = false;
 
   // Wall-clock NASA No-Response Escalation Ladder state
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -187,7 +182,7 @@ export class AssistantController {
 
   public caption: AssistantCaptionState = {
     speaker: "ASSISTANT",
-    text: "All suit systems nominal, Sir. Monitoring surface EVA telemetry.",
+    text: "Suit systems nominal, Sir.",
     interimTranscript: "",
     timestampT: 0,
     alertClass: 0,
@@ -196,7 +191,6 @@ export class AssistantController {
     isSpeaking: false,
     voiceConnected: false,
     cloudStatus: "checking",
-    callsign: "Sir",
     escalationStage: 0,
     unresponsiveEscalated: false,
   };
@@ -229,12 +223,6 @@ export class AssistantController {
     }
   }
 
-  public setCallsign(callsign: CrewCallsign): void {
-    this.callsign = callsign;
-    this.history[0] = { role: "system", content: buildSystemPrompt(callsign) };
-    this.emitCaption({ callsign });
-  }
-
   public async probeCloud(): Promise<void> {
     this.emitCaption({ cloudStatus: "checking" });
     const res = await this.client.checkHealth();
@@ -253,21 +241,19 @@ export class AssistantController {
     this.emitCaption({ voiceConnected: connected });
   }
 
-  /** Plays welcoming EVA suit boot greeting once the operator enters the visor */
-  public announceSuitEntry(openMic = false): void {
+  /**
+   * Silent nominal suit entry: plays short boot wake chord, opens mic if enabled,
+   * and stays quiet during nominal conditions unless spoken to.
+   */
+  public enterSuitSilent(openMic = false): void {
     this.voice.fx.playBootChime();
-    const msg = `EVA visor online, ${this.callsign}. Suit pressure 43.0 kilopascals, oxygen nominal. Standing by on live comms.`;
     const live = this.bridge.get_state();
     this.emitCaption({
       speaker: "ASSISTANT",
-      text: msg,
+      text: "Suit systems nominal, Sir. Standing by.",
       timestampT: live.t,
       alertClass: live.overallClass,
-      callsign: this.callsign,
     });
-    if (this.voice.enabled) {
-      void this.voice.speak(msg, "nominal");
-    }
     if (openMic) {
       this.startOpenMic();
     }
@@ -280,7 +266,7 @@ export class AssistantController {
     if (!this.voice.enabled) {
       this.setVoiceConnected(true);
     }
-    const ok = this.voice.startContinuousListening({
+    return this.voice.startContinuousListening({
       onInterim: (interim) => {
         this.emitCaption({ interimTranscript: interim });
       },
@@ -295,11 +281,10 @@ export class AssistantController {
         this.emitCaption({
           isListening: listening,
           interimTranscript: listening ? this.caption.interimTranscript : "",
-          ...(errorNote ? { speaker: "ASSISTANT", text: `${this.callsign}, ${errorNote}.` } : {}),
+          ...(errorNote ? { speaker: "ASSISTANT", text: `${errorNote}, Sir.` } : {}),
         });
       },
     });
-    return ok;
   }
 
   public stopOpenMic(): void {
@@ -319,12 +304,9 @@ export class AssistantController {
     const clean = transcript.trim().toLowerCase();
     if (!clean) return;
 
-    // Hands-free mic & audio control commands
     if (/^(mic off|stop listening|close mic|standby mic)/.test(clean)) {
       this.stopOpenMic();
-      const ack = `Microphone standing by, ${this.callsign}.`;
-      this.emitCaption({ speaker: "ASSISTANT", text: ack });
-      void this.voice.speak(ack, "nominal");
+      this.emitCaption({ speaker: "ASSISTANT", text: "Mic standing by, Sir." });
       return;
     }
 
@@ -392,12 +374,12 @@ export class AssistantController {
     const silentSince = Math.max(this.hazardUnconfirmedSinceMs, this.lastCrewInteractionMs);
     const elapsedSec = (now - silentSince) / 1000;
 
-    // Stage 1 (~14s): Direct NASA verification nudge with live sensor delta
+    // Stage 1 (~14s): Direct action check-in
     if (this.escalationStage === 0 && elapsedSec >= 14) {
       this.escalationStage = 1;
       const telemetryHint = this.buildLiveHazardTelemetryHint(live);
-      const stepHint = activeProto ? activeProto.currentStep.instruction : primary?.title ?? "active alert";
-      const msg = `${this.callsign}, verification needed: ${stepHint} (${telemetryHint}). Say confirm when done.`;
+      const stepHint = activeProto ? activeProto.currentStep.instruction : primary?.suggestedActions[0] ?? "Acknowledge";
+      const msg = `Sir, check in — ${telemetryHint}. ${stepHint} Say confirm.`;
       this.voice.fx.playAlertTone(live.overallClass || 2);
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -407,17 +389,16 @@ export class AssistantController {
         escalationStage: 1,
       });
       if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-        void this.voice.speak(msg, classToUrgency(live.overallClass));
+        void this.voice.speak(msg, classToUrgency(live.overallClass), false);
       }
       return;
     }
 
-    // Stage 2 (~30s): Incapacitation physiology cross-check + backup directive
+    // Stage 2 (~30s): Incapacitation check + backup order
     if (this.escalationStage === 1 && elapsedSec >= 30) {
       this.escalationStage = 2;
       const hr = Math.round(live.indicators.heart_rate.value);
-      const resp = Math.round(live.indicators.respiration_rate.value);
-      const msg = `${this.callsign}, still no acknowledgment. Measured HR ${hr} bpm, resp ${resp}/min. Execute backup fail-safe immediately or acknowledge comms.`;
+      const msg = `Sir, respond now. Measured heart rate ${hr} bpm. Execute backup failsafe or confirm comms.`;
       this.voice.fx.playAlertTone(1);
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -427,19 +408,18 @@ export class AssistantController {
         escalationStage: 2,
       });
       if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-        void this.voice.speak(msg, "emergency");
+        void this.voice.speak(msg, "emergency", true);
       }
       return;
     }
 
-    // Stage 3 (~46s+): Unresponsive Crew Escalation + Habitat / Flight Surgeon hail
+    // Stage 3 (~46s+): Log unresponsive crew & hail Habitat / Flight Surgeon
     if (this.escalationStage === 2 && elapsedSec >= 46) {
       this.escalationStage = 3;
       this.lastStage3PulseMs = now;
       const protoId = activeProto?.id ?? primary?.protocolId ?? "none";
-      const summary = `${this.callsign} unresponsive >45s on ${primary?.title ?? protoId}`;
-      this.bridge.log_escalation(protoId, 3, summary);
-      const msg = `CREW UNRESPONSIVE — ${this.callsign}, escalating telemetry packet and hailing Habitat / Flight Surgeon (expected ~12 min Earth reply delay).`;
+      this.bridge.log_escalation(protoId, 3, `Crew unresponsive >45s on ${primary?.title ?? protoId}`);
+      const msg = `No response, Sir. Hailing Habitat Flight Surgeon — 12-minute relay delay.`;
       this.voice.fx.playEscalationPulse();
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -450,12 +430,11 @@ export class AssistantController {
         unresponsiveEscalated: true,
       });
       if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-        void this.voice.speak(msg, "emergency");
+        void this.voice.speak(msg, "emergency", true);
       }
       return;
     }
 
-    // Periodic Class 1 transponder pulse while escalated (every ~22s)
     if (this.escalationStage === 3 && now - this.lastStage3PulseMs >= 22000) {
       this.lastStage3PulseMs = now;
       this.voice.fx.playEscalationPulse();
@@ -467,23 +446,41 @@ export class AssistantController {
     if (!primary) return `HR ${Math.round(live.indicators.heart_rate.value)} bpm`;
     switch (primary.area) {
       case "radiation":
-        return `dose rate ${live.indicators.dose_rate.value.toFixed(1)} mSv/day`;
+        return `dose ${live.indicators.dose_rate.value.toFixed(1)} mSv/day`;
       case "environment": {
         const suitP = live.indicators.suit_pressure.value;
-        if (suitP < 31) return `suit pressure ${suitP.toFixed(1)} kPa`;
+        if (suitP < 31) return `suit ${suitP.toFixed(1)} kPa`;
         if (live.indicators.pio2.value < 142) return `PIO₂ ${live.indicators.pio2.value.toFixed(0)} mmHg`;
         return `ppCO₂ ${live.indicators.ppco2.value.toFixed(2)} mmHg`;
       }
-      case "cardiovascular":
-        return `HR ${Math.round(live.indicators.heart_rate.value)} bpm`;
       default:
         return `HR ${Math.round(live.indicators.heart_rate.value)} bpm`;
     }
   }
 
+  private buildTacticalCallout(
+    primary: AlertObject,
+    stepInstruction: string,
+    extraQueued: number
+  ): string {
+    const leadMap: Record<string, string> = {
+      rad_spe_rate: `Solar flare, Sir — ${primary.whyLine}.`,
+      env_pressure_bounds: `Suit leak, Sir — ${primary.whyLine}.`,
+      env_pio2_low: `Oxygen dropping, Sir — ${primary.whyLine}.`,
+      env_ppco2_1h: `High CO₂, Sir — ${primary.whyLine}.`,
+      cv_context_hr: `High heart rate, Sir — ${primary.whyLine}.`,
+      cascade_coupled: `Multiple hazards, Sir — ${primary.whyLine}.`,
+    };
+    const head = leadMap[primary.detectorId] ?? `${primary.title}, Sir — ${primary.whyLine}.`;
+    const action = stepInstruction || primary.suggestedActions[0] || "Check suit telemetry.";
+    const qNote = extraQueued > 0 ? ` (${extraQueued} more queued.)` : "";
+    return `${head} ${action}${qNote}`;
+  }
+
   /**
-   * Handles newly raised alerts deterministically (< 2 s per ENG-DET-008)
-   * and starts/preempts guided protocols automatically.
+   * Handles newly raised alerts deterministically (< 2 s per ENG-DET-008):
+   * starts/preempts top protocol, queues all concurrent secondary protocols,
+   * and NEVER speaks unprompted when nominal.
    */
   public onAlertsUpdated(alerts: AlertObject[]): void {
     const activeIds = new Set(alerts.map((a) => a.id));
@@ -502,54 +499,69 @@ export class AssistantController {
           escalationStage: 0,
           unresponsiveEscalated: false,
           speaker: "ASSISTANT",
-          text: `All anomalies cleared, ${this.callsign}. EVA telemetry within limits.`,
+          text: "Suit systems nominal, Sir.",
           timestampT: live.t,
         });
       }
       return;
     }
 
-    const primary = alerts[0];
-    if (this.lastAnnouncedAlertIds.has(primary.id)) return;
-    this.lastAnnouncedAlertIds.add(primary.id);
-
-    const liveBefore = this.bridge.get_state();
-    let stepLine = "";
-    let preemptNote = "";
-
-    if (primary.protocolId) {
-      const currentProto = liveBefore.activeProtocol;
-      const shouldStartOrPreempt =
-        !currentProto ||
-        currentProto.completed ||
-        (currentProto.id !== primary.protocolId && primary.class === 1);
-
-      if (shouldStartOrPreempt) {
-        if (currentProto && !currentProto.completed && currentProto.id !== primary.protocolId) {
-          preemptNote = ` Pausing ${currentProto.name} for Class 1 priority.`;
-        }
-        const started = this.bridge.start_protocol(primary.protocolId);
-        stepLine = ` ${started.currentStep.instruction}`;
+    // Queue EVERY distinct concurrent alert protocol cleanly so dual hazards never vanish
+    const distinctProtocols: ProtocolId[] = [];
+    for (const alr of alerts) {
+      if (alr.protocolId && !distinctProtocols.includes(alr.protocolId)) {
+        distinctProtocols.push(alr.protocolId);
       }
     }
 
-    const escalationNote = primary.escalateToMedical
-      ? ` Contact Flight Surgeon (~${ENGINE_LIMITS.earthReplyDelayMin.value} min reply delay).`
-      : "";
+    const primary = alerts[0];
+    const isNewPrimary = !this.lastAnnouncedAlertIds.has(primary.id);
+    if (!isNewPrimary) {
+      // Even if primary didn't change, ensure any newly added concurrent protocol is queued
+      for (const pid of distinctProtocols) {
+        this.bridge.queue_protocol(pid, true);
+      }
+      return;
+    }
+    this.lastAnnouncedAlertIds.add(primary.id);
 
-    const queueNote =
-      alerts.length > 1
-        ? ` (${alerts.length} concurrent hazards detected; prioritizing Class ${primary.class} ${primary.area}.)`
-        : "";
+    // If this alert arrived synchronously during confirmCurrentProtocolStep, let confirmCurrentProtocolStep speak cleanly once!
+    if (this.suppressAlertSync) {
+      for (const pid of distinctProtocols) {
+        this.bridge.queue_protocol(pid, true);
+      }
+      return;
+    }
 
-    const leadCall =
-      primary.class === 1
-        ? `Emergency alert, ${this.callsign}: `
-        : primary.class === 2
-          ? `Caution, ${this.callsign}: `
-          : `Advisory, ${this.callsign}: `;
+    const liveBefore = this.bridge.get_state();
+    let stepInstruction = "";
+    if (primary.protocolId) {
+      const currentProto = liveBefore.activeProtocol;
+      const currentProtoClass = currentProto
+        ? Math.min(
+            3,
+            ...(alerts.filter((a) => a.protocolId === currentProto.id).map((a) => a.class) || [3])
+          )
+        : 99;
+      const shouldStartOrPreempt =
+        !currentProto ||
+        currentProto.completed ||
+        (currentProto.id !== primary.protocolId && primary.class < currentProtoClass);
 
-    const msg = `${leadCall}${primary.explanation}${preemptNote}${stepLine}${escalationNote}${queueNote}`;
+      if (shouldStartOrPreempt) {
+        const started = this.bridge.start_protocol(primary.protocolId, true);
+        stepInstruction = started.currentStep.instruction;
+      } else {
+        stepInstruction = currentProto.currentStep.instruction;
+      }
+    }
+
+    for (const pid of distinctProtocols) {
+      this.bridge.queue_protocol(pid, true);
+    }
+
+    const extraQueued = Math.max(0, distinctProtocols.length - 1);
+    const msg = this.buildTacticalCallout(primary, stepInstruction, extraQueued);
 
     const live = this.bridge.get_state();
     this.bridge.log_activity("activity_start", { event: "alert_announced", alertId: primary.id });
@@ -568,8 +580,9 @@ export class AssistantController {
       escalationStage: 0,
       unresponsiveEscalated: false,
     });
+
     if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-      void this.voice.speak(msg, classToUrgency(primary.class));
+      void this.voice.speak(msg, classToUrgency(primary.class), primary.class === 1);
     }
   }
 
@@ -581,21 +594,27 @@ export class AssistantController {
 
     const confirmedStep = proto.currentStepIndex;
     const confirmedProtoId = proto.id;
-    const updated = this.bridge.complete_step(confirmedProtoId, confirmedStep);
+
+    let updated: ReturnType<AssistantEngineBridge["complete_step"]> = null;
+    this.suppressAlertSync = true;
+    try {
+      updated = this.bridge.complete_step(confirmedProtoId, confirmedStep);
+    } finally {
+      this.suppressAlertSync = false;
+    }
     if (!updated) return;
 
     this.voice.fx.playStepConfirm();
-    this.onStepMitigation?.(confirmedProtoId, confirmedStep);
 
     const postState = this.bridge.get_state();
     let reply: string;
     if (updated.completed && postState.activeProtocol && postState.activeProtocol.id !== updated.id) {
       const resumed = postState.activeProtocol;
-      reply = `${updated.name} complete, ${this.callsign}. Resuming ${resumed.name}: ${resumed.currentStep.instruction}`;
+      reply = `${updated.name} clear, Sir. Next: ${resumed.currentStep.instruction}`;
     } else if (updated.completed) {
-      reply = `${updated.name} completed and logged at ${formatMissionClock(live.missionDay, live.timeOfDaySec)}, ${this.callsign}. Telemetry stabilizing.`;
+      reply = `Cleared, Sir.`;
     } else {
-      reply = `Step ${confirmedStep + 1} confirmed, ${this.callsign}. Next: ${updated.currentStep.instruction}`;
+      reply = `Copy, Sir. Next: ${updated.currentStep.instruction}`;
     }
 
     this.hazardUnconfirmedSinceMs = Date.now();
@@ -608,7 +627,7 @@ export class AssistantController {
       unresponsiveEscalated: false,
     });
     if (this.voice.enabled) {
-      void this.voice.speak(reply, classToUrgency(postState.overallClass));
+      void this.voice.speak(reply, classToUrgency(postState.overallClass), false);
     }
   }
 
@@ -630,7 +649,7 @@ export class AssistantController {
       isBusy: true,
     });
 
-    // Quick local confirmation shortcut ("confirm", "inside", "done", "roger", "copy")
+    // Fast voice/text confirmation shortcut
     if (
       live.activeProtocol &&
       !live.activeProtocol.completed &&
@@ -641,7 +660,6 @@ export class AssistantController {
       return this.caption.text;
     }
 
-    // Quick acknowledgement for un-protocoled active alerts
     if (
       !live.activeProtocol &&
       live.rankedPrimaryAlert &&
@@ -649,7 +667,7 @@ export class AssistantController {
     ) {
       this.bridge.acknowledge(live.rankedPrimaryAlert.id);
       this.voice.fx.playStepConfirm();
-      const ackReply = `Acknowledged and logged, ${this.callsign}. Monitoring continues.`;
+      const ackReply = `Acknowledged, Sir.`;
       this.emitCaption({
         speaker: "ASSISTANT",
         text: ackReply,
@@ -658,7 +676,7 @@ export class AssistantController {
         isBusy: false,
       });
       if (this.voice.enabled) {
-        void this.voice.speak(ackReply, classToUrgency(this.bridge.get_state().overallClass));
+        void this.voice.speak(ackReply, classToUrgency(this.bridge.get_state().overallClass), false);
       }
       return ackReply;
     }
@@ -681,7 +699,8 @@ export class AssistantController {
       isBusy: false,
     });
     if (this.voice.enabled) {
-      void this.voice.speak(reply, classToUrgency(post.overallClass));
+      // User-requested query plays directly cleanly (interrupt = true if responding to new crew question)
+      void this.voice.speak(reply, classToUrgency(post.overallClass), true);
     }
     return reply;
   }
@@ -771,10 +790,15 @@ export class AssistantController {
       case "complete_step": {
         const proto = args.protocol as ProtocolId;
         const step = Number(args.step ?? 0);
-        const res = this.bridge.complete_step(proto, step);
+        let res: ReturnType<AssistantEngineBridge["complete_step"]> = null;
+        this.suppressAlertSync = true;
+        try {
+          res = this.bridge.complete_step(proto, step);
+        } finally {
+          this.suppressAlertSync = false;
+        }
         if (res) {
           this.voice.fx.playStepConfirm();
-          this.onStepMitigation?.(proto, step);
         }
         return res;
       }
@@ -796,7 +820,7 @@ export class AssistantController {
     if (/dose|rad|shelter|dangerous|how long/.test(q)) {
       const rate = s.indicators.dose_rate;
       const cum = s.indicators.dose_cumulative;
-      return `${this.callsign}, at ${clk}, measured dose rate is ${rate.value.toFixed(2)} mSv/day and estimated cumulative dose is ${cum.value.toFixed(1)} mSv (${s.careerDosePercent.toFixed(1)}% of the 600 mSv limit; SPE event ${s.speEventDoseMsv.toFixed(1)} vs 250 mSv design reference).`;
+      return `Sir, at ${clk}, measured dose rate is ${rate.value.toFixed(2)} mSv/day and estimated cumulative dose is ${cum.value.toFixed(1)} mSv (${s.careerDosePercent.toFixed(1)}% of 600 mSv limit).`;
     }
 
     if (/heart|hr|bpm|pulse|exercise/.test(q)) {
@@ -806,33 +830,33 @@ export class AssistantController {
         hr.value <= limit
           ? `within the ${limit} bpm limit expected for ${s.context.activity}`
           : `above the ${limit} bpm limit for ${s.context.activity}`;
-      return `${this.callsign}, at ${clk}, measured heart rate is ${Math.round(hr.value)} bpm (${hr.kind}), which is ${status}.`;
+      return `Sir, at ${clk}, measured heart rate is ${Math.round(hr.value)} bpm (${hr.kind}), which is ${status}.`;
     }
 
     if (/co2|air|oxygen|pio2|pressure|breathe|leak/.test(q)) {
       const co2 = s.indicators.ppco2;
       const o2 = s.indicators.pio2;
       const press = s.indicators.suit_pressure;
-      return `${this.callsign}, at ${clk}, measured suit pressure is ${press.value.toFixed(1)} kPa, measured ppCO₂ is ${co2.value.toFixed(2)} mmHg (3.0 mmHg 1-hr limit), and measured PIO₂ is ${o2.value.toFixed(0)} mmHg (145–155 mmHg normoxia).`;
+      return `Sir, at ${clk}, suit pressure is ${press.value.toFixed(1)} kPa, measured ppCO₂ is ${co2.value.toFixed(2)} mmHg, and PIO₂ is ${o2.value.toFixed(0)} mmHg.`;
     }
 
     if (/bone|immune|sleep|vision|sans|cognitive/.test(q)) {
       const lum = s.indicators.bone_loss_lumbar;
       const imm = s.indicators.immune_index;
-      return `${this.callsign}, at ${clk}, estimated lumbar BMD is ${lum.value.toFixed(2)}% of preflight (${lum.uncertainty?.low}–${lum.uncertainty?.high}%, DXA is record) and the demonstration immune index is ${imm.value.toFixed(0)}/100.`;
+      return `Sir, at ${clk}, estimated lumbar BMD is ${lum.value.toFixed(2)}% of preflight (${lum.uncertainty?.low}–${lum.uncertainty?.high}%, DXA is record) and the demonstration immune index is ${imm.value.toFixed(0)}/100.`;
     }
 
     if (s.rankedPrimaryAlert) {
       const alr = s.rankedPrimaryAlert;
-      const protoHint = alr.protocolId
-        ? ` Active protocol: ${PROTOCOLS[alr.protocolId].name}.`
+      const stepHint = s.activeProtocol
+        ? ` Action: ${s.activeProtocol.currentStep.instruction}`
         : "";
-      return `${this.callsign}, ${alr.explanation}${protoHint}`;
+      return `Sir, ${alr.whyLine}.${stepHint}`;
     }
 
     const hr = s.indicators.heart_rate;
     const pio2 = s.indicators.pio2;
-    const cum = s.indicators.dose_cumulative;
-    return `${this.callsign}, at ${clk} (${s.context.activity}), measured heart rate is ${Math.round(hr.value)} bpm and PIO₂ is ${pio2.value.toFixed(0)} mmHg (within limits), while estimated cumulative radiation is ${cum.value.toFixed(1)} mSv (${s.careerDosePercent.toFixed(1)}% of 600 mSv).`;
+    const press = s.indicators.suit_pressure;
+    return `All nominal, Sir (${clk}). Measured HR ${Math.round(hr.value)} bpm, suit pressure ${press.value.toFixed(1)} kPa, PIO₂ ${pio2.value.toFixed(0)} mmHg.`;
   }
 }

@@ -81,6 +81,7 @@ export class VoiceService {
   private currentAudioUrl: string | null = null;
   private player: HTMLAudioElement | null = null;
   private speechGeneration = 0;
+  private speechQueueTail: Promise<void> = Promise.resolve();
   private isSpeaking = false;
   private lastSpokenNormalized = "";
   private lastSpokeEndedAtMs = 0;
@@ -147,6 +148,7 @@ export class VoiceService {
 
   public stopSpeech(): void {
     this.speechGeneration += 1;
+    this.speechQueueTail = Promise.resolve();
     if (this.player) {
       try {
         this.player.pause();
@@ -165,14 +167,37 @@ export class VoiceService {
     this.setSpeaking(false);
   }
 
-  public async speak(text: string, urgency: SpeechUrgency = "nominal"): Promise<void> {
-    if (!this.enabled || !text.trim() || typeof window === "undefined") return;
+  public speak(
+    text: string,
+    urgency: SpeechUrgency = "nominal",
+    interrupt = false
+  ): Promise<void> {
+    if (!this.enabled || !text.trim() || typeof window === "undefined") {
+      return Promise.resolve();
+    }
 
-    this.stopSpeech();
-    const myGen = this.speechGeneration;
+    if (interrupt) {
+      this.stopSpeech();
+    }
+    const targetGen = this.speechGeneration;
+
+    const job = async () => {
+      if (targetGen !== this.speechGeneration || !this.enabled) return;
+      await this.playUtteranceNow(text, urgency, targetGen);
+    };
+
+    this.speechQueueTail = this.speechQueueTail.then(job, job);
+    return this.speechQueueTail;
+  }
+
+  private async playUtteranceNow(
+    text: string,
+    urgency: SpeechUrgency,
+    myGen: number
+  ): Promise<void> {
+    if (myGen !== this.speechGeneration || !this.enabled || !text.trim()) return;
+
     this.lastSpokenNormalized = normalizeForEcho(text);
-
-    // Clear short helmet radio open-squelch click
     this.fx.playCommsClick(true);
 
     try {

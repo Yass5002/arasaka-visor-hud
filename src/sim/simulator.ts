@@ -518,24 +518,34 @@ export class MissionSimulator {
 
   /**
    * Feeds corrective crew actions from confirmed protocol steps directly back
-   * into the physical suit/environment model so confirmed fixes stabilize telemetry.
+   * into the physical suit/environment model and marks resolved scenarios done.
    */
-  public applyMitigationForStep(protocolId: ProtocolId, stepIndex: number): void {
+  public applyMitigationForStep(
+    protocolId: ProtocolId,
+    stepIndex: number,
+    notifyNow = false
+  ): void {
     let changed = false;
-    if (protocolId === "shelter" && stepIndex >= 2) {
+    if (protocolId === "shelter" && stepIndex >= 1) {
       this.mitigatedPresets.add("S-01");
+      this.mitigatedPresets.add("S-12");
+      this.activePresets = this.activePresets.filter((p) => p.id !== "S-01" && p.id !== "S-12");
       changed = true;
     } else if (protocolId === "air_check" && stepIndex >= 1) {
       this.mitigatedPresets.add("S-02");
       this.mitigatedPresets.add("S-03");
       this.mitigatedPresets.add("S-14");
+      this.activePresets = this.activePresets.filter(
+        (p) => p.id !== "S-02" && p.id !== "S-03" && p.id !== "S-14"
+      );
       changed = true;
     } else if (protocolId === "exertion_recovery" && stepIndex >= 1) {
       this.mitigatedPresets.add("S-04");
+      this.activePresets = this.activePresets.filter((p) => p.id !== "S-04");
       changed = true;
     }
     if (changed) {
-      this.stepSimulation(this.engine.getTime(), true);
+      this.stepSimulation(this.engine.getTime(), notifyNow);
     }
   }
 

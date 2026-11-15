@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AssistantController,
   type AssistantCaptionState,
-  type CrewCallsign,
 } from "./assistant/assistantController";
 import { AzureProxyClient } from "./assistant/azureClient";
 import { VoiceService, type AzureVoiceId } from "./assistant/voiceService";
@@ -38,13 +37,13 @@ export function App() {
   if (!refs.current) {
     const engine = new CrewHealthEngine({ missionLengthDays: 180 });
     const simulator = new MissionSimulator(engine);
+    engine.onStepMitigation = (protoId, stepIdx) => {
+      simulator.applyMitigationForStep(protoId, stepIdx, false);
+    };
     const bridge = new AssistantEngineBridge(engine);
     const client = new AzureProxyClient();
     const voice = new VoiceService(client);
     const assistant = new AssistantController(bridge, client, voice);
-    assistant.onStepMitigation = (protoId, stepIdx) => {
-      simulator.applyMitigationForStep(protoId, stepIdx);
-    };
     refs.current = { engine, simulator, bridge, client, voice, assistant };
   }
 
@@ -57,7 +56,6 @@ export function App() {
     items: [],
     cloudHealth: null,
   });
-  const [callsign, setCallsign] = useState<CrewCallsign>("Sir");
   const [openMicOnLaunch, setOpenMicOnLaunch] = useState(true);
 
   const [liveState, setLiveState] = useState<LiveState>(() => engine.getLiveState());
@@ -66,7 +64,7 @@ export function App() {
     {
       id: "welcome-0",
       speaker: "ASSISTANT",
-      text: "EVA visor telemetry initialized, Sir. All life-support systems nominal.",
+      text: "Suit systems nominal, Sir. Standing by.",
       missionClock: "Sol 1 08:00",
     },
   ]);
@@ -87,7 +85,7 @@ export function App() {
   const captionRef = useRef<AssistantCaptionState | null>(captionState);
   const lastLoggedMsgRef = useRef<string>("");
 
-  // Step 1 on boot: preload all 3D visual assets, fonts & cloud checks BEFORE showing scene or sim
+  // Preload all visual assets, fonts & cloud checks BEFORE showing scene or starting telemetry
   useEffect(() => {
     let cancelled = false;
     void runMissionAssetPreload(client, (snap) => {
@@ -164,13 +162,12 @@ export function App() {
 
   const handleLaunchEva = useCallback(() => {
     if (!preload.ready) return;
-    assistant.setCallsign(callsign);
     simulator.enterEvaSurface();
     voice.unlockAudio();
     assistant.setVoiceConnected(true);
     setPhase("live");
-    assistant.announceSuitEntry(openMicOnLaunch);
-  }, [preload.ready, assistant, callsign, simulator, voice, openMicOnLaunch]);
+    assistant.enterSuitSilent(openMicOnLaunch);
+  }, [preload.ready, assistant, simulator, voice, openMicOnLaunch]);
 
   const sampleAudioLevels = useCallback(() => {
     return {
@@ -184,12 +181,7 @@ export function App() {
     return (
       <PreLaunchBriefing
         preload={preload}
-        callsign={callsign}
         openMicOnLaunch={openMicOnLaunch}
-        onChangeCallsign={(cs) => {
-          setCallsign(cs);
-          assistant.setCallsign(cs);
-        }}
         onChangeOpenMicOnLaunch={setOpenMicOnLaunch}
         onLaunch={handleLaunchEva}
       />
@@ -255,10 +247,7 @@ export function App() {
         onTestVoice={() => {
           voice.unlockAudio();
           assistant.setVoiceConnected(true);
-          void voice.speak(
-            `Arasaka Crew Health Assistant comms check nominal, ${callsign}. Suit radio audio active.`,
-            "nominal"
-          );
+          void voice.speak("Suit radio check nominal, Sir.", "nominal", true);
         }}
         radioFilterEnabled={radioFilterEnabled}
         onToggleRadioFilter={(enabled) => {
@@ -269,11 +258,6 @@ export function App() {
         onToggleSfx={(enabled) => {
           voice.fx.sfxEnabled = enabled;
           setSfxEnabled(enabled);
-        }}
-        callsign={callsign}
-        onChangeCallsign={(cs) => {
-          setCallsign(cs);
-          assistant.setCallsign(cs);
         }}
         cloudStatus={captionState.cloudStatus}
         onProbeCloud={() => void assistant.probeCloud()}

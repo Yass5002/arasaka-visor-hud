@@ -52,6 +52,7 @@ export class EngineStore {
 
   public activeAlerts: AlertObject[] = [];
   public cooldownUntilByArea: Partial<Record<HealthArea, number>> = {};
+  public rollingWindowFloorByIndicator: Partial<Record<IndicatorId, number>> = {};
   public activeProtocol: ActiveProtocolState | null = null;
   public pausedProtocols: ActiveProtocolState[] = [];
 
@@ -207,7 +208,8 @@ export class EngineStore {
     const list = this.samplesByIndicator.get(id);
     if (!list || list.length === 0) return null;
 
-    const fromT = Math.max(0, toT - windowSec);
+    const floorT = this.rollingWindowFloorByIndicator[id] ?? 0;
+    const fromT = Math.max(floorT, toT - windowSec);
     if (toT <= fromT) {
       return list[list.length - 1].value;
     }
@@ -463,6 +465,7 @@ export class EngineStore {
       suggestedActions: [...a.suggestedActions],
     }));
     this.cooldownUntilByArea = { ...snap.cooldownUntilByArea };
+    this.rollingWindowFloorByIndicator = {};
     this.activeProtocol = snap.activeProtocol
       ? {
           ...snap.activeProtocol,

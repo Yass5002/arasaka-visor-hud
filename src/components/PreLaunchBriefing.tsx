@@ -1,6 +1,5 @@
 import React from "react";
 import type { PreloadSnapshot } from "../services/assetPreloader";
-import type { CrewCallsign } from "../assistant/assistantController";
 
 const CheckIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -48,18 +47,14 @@ const VolumeIcon = () => (
 
 interface PreLaunchBriefingProps {
   preload: PreloadSnapshot;
-  callsign: CrewCallsign;
   openMicOnLaunch: boolean;
-  onChangeCallsign: (callsign: CrewCallsign) => void;
   onChangeOpenMicOnLaunch: (enabled: boolean) => void;
   onLaunch: () => void;
 }
 
 export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
   preload,
-  callsign,
   openMicOnLaunch,
-  onChangeCallsign,
   onChangeOpenMicOnLaunch,
   onLaunch,
 }) => {
@@ -86,8 +81,8 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
         </div>
 
         <p className="hds-briefing-lead">
-          On-board autonomous crew health monitoring, suit life-support anomaly detection, and voice-guided
-          response operating completely independently from Earth under simulated ~12-minute light-time delay.
+          Autonomous helmet-visor crew health monitoring and Earth-independent suit anomaly guidance for
+          outside-habitat Mars EVA (~12-minute communication delay).
         </p>
 
         <div className="hds-briefing-info-grid">
@@ -95,8 +90,8 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
             <div className="hds-briefing-info-label">OPERATIONAL ENVIRONMENT</div>
             <div className="hds-briefing-info-val">Outside Habitat — Mars Surface EVA</div>
             <div className="hds-briefing-info-sub">
-              Jezero Crater exterior terrain with helmet-visor optical projection, suit pressure (43.0 kPa),
-              PIO₂, ppCO₂, and solar radiation monitoring.
+              Jezero Crater panorama with optical helmet HUD monitoring suit pressure (43.0 kPa), PIO₂, ppCO₂,
+              heart rate, and solar radiation.
             </div>
           </div>
 
@@ -104,17 +99,17 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
             <div className="hds-briefing-info-label">STANDARDS &amp; TRUTHFULNESS</div>
             <div className="hds-briefing-info-val">NASA-STD-3001 Vol 2 Rev F</div>
             <div className="hds-briefing-info-sub">
-              Threshold classes (Class 1–3), step-by-step response protocols, and strict non-diagnostic
-              separation of sensed measurements vs modelled estimates.
+              Class 1–3 hazard ranking, guided mitigation protocols, and strict non-diagnostic telemetry
+              grounding.
             </div>
           </div>
 
           <div className="hds-briefing-info-box">
-            <div className="hds-briefing-info-label">INTERACTIVE VOICE &amp; AUDIO</div>
-            <div className="hds-briefing-info-val">Suit Comms Live by Default</div>
+            <div className="hds-briefing-info-label">VOICE &amp; AUDIO COMMS</div>
+            <div className="hds-briefing-info-val">Tactical Suit Comms Ready</div>
             <div className="hds-briefing-info-sub">
-              Helmet bandpass comms audio, aerospace C&amp;W caution/warning tones, barge-in interruption, and
-              unresponsive-crew NASA escalation protocol.
+              Quiet under nominal conditions; speaks immediately on hazard triggers, two-way voice queries, or
+              crew non-response escalation.
             </div>
           </div>
         </div>
@@ -123,33 +118,12 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
           <ShieldAlertIcon />
           <span>
             <strong>Demonstration Notice:</strong> All biomedical, radiation, and suit atmosphere streams are
-            simulated for educational and technical demonstration. Voice &amp; AI unlock automatically when you
-            enter the visor.
+            simulated for technical demonstration. Suit audio &amp; comms unlock cleanly when you enter the visor.
           </span>
         </div>
 
-        <div className="hds-briefing-prefs">
-          <div className="hds-briefing-pref-item">
-            <span className="hds-pref-label">AI Address Mode</span>
-            <div className="hds-segmented">
-              <button
-                type="button"
-                className={callsign === "Sir" ? "is-active" : ""}
-                onClick={() => onChangeCallsign("Sir")}
-              >
-                &ldquo;Sir&rdquo;
-              </button>
-              <button
-                type="button"
-                className={callsign === "Commander" ? "is-active" : ""}
-                onClick={() => onChangeCallsign("Commander")}
-              >
-                &ldquo;Commander&rdquo;
-              </button>
-            </div>
-          </div>
-
-          {micSupported && (
+        {micSupported && (
+          <div className="hds-briefing-prefs">
             <label className="hds-briefing-pref-toggle">
               <input
                 type="checkbox"
@@ -159,8 +133,8 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
               <MicIcon />
               <span>Keep Live Duplex Microphone Open on Entry</span>
             </label>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Asset & System Preload Progress */}
         <div className="hds-preload-panel">
@@ -172,10 +146,7 @@ export const PreLaunchBriefing: React.FC<PreLaunchBriefingProps> = ({
           </div>
 
           <div className="hds-progress-track">
-            <div
-              className="hds-progress-fill"
-              style={{ width: `${preload.progressPct}%` }}
-            />
+            <div className="hds-progress-fill" style={{ width: `${preload.progressPct}%` }} />
           </div>
 
           <ul className="hds-preload-list">

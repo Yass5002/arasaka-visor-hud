@@ -134,8 +134,12 @@ export class AssistantEngineBridge {
   // 8.2 ACTION CALLS
   // =========================================================================
 
-  public start_protocol(name: ProtocolId): ActiveProtocolState {
-    return this.engine.startProtocol(name);
+  public start_protocol(name: ProtocolId, autoTriggered = false): ActiveProtocolState {
+    return this.engine.startProtocol(name, autoTriggered);
+  }
+
+  public queue_protocol(name: ProtocolId, autoTriggered = false): void {
+    this.engine.queueProtocol(name, autoTriggered);
   }
 
   public complete_step(protocol: ProtocolId, step: number): ActiveProtocolState | null {

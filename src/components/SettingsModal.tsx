@@ -1,5 +1,4 @@
 import React, { useEffect } from "react";
-import type { CrewCallsign } from "../assistant/assistantController";
 import { AZURE_VOICE_OPTIONS, type AzureVoiceId } from "../assistant/voiceService";
 import { TERRAIN_SOURCES } from "../engine/config";
 import type { CrewHealthEngine } from "../engine/engine";
@@ -19,8 +18,6 @@ export interface SettingsModalProps {
   onToggleRadioFilter: (enabled: boolean) => void;
   sfxEnabled: boolean;
   onToggleSfx: (enabled: boolean) => void;
-  callsign: CrewCallsign;
-  onChangeCallsign: (callsign: CrewCallsign) => void;
   cloudStatus: "ready" | "fallback" | "checking";
   onProbeCloud: () => void;
   proxyBaseUrl: string;
@@ -43,8 +40,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleRadioFilter,
   sfxEnabled,
   onToggleSfx,
-  callsign,
-  onChangeCallsign,
   cloudStatus,
   onProbeCloud,
   proxyBaseUrl,
@@ -148,24 +143,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 NASA C&amp;W Alert Tones: {sfxEnabled ? "ON" : "OFF"}
               </button>
-            </div>
-
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11.5, color: "#aeb0b5", marginBottom: 4 }}>
-                AI Address Persona
-              </div>
-              <div className="chip-row">
-                {(["Sir", "Commander"] as const).map((cs) => (
-                  <button
-                    key={cs}
-                    type="button"
-                    className={`chip-btn ${callsign === cs ? "active" : ""}`}
-                    onClick={() => onChangeCallsign(cs)}
-                  >
-                    Address as &ldquo;{cs}&rdquo;
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="mono" style={{ fontSize: 11, color: "#aeb0b5" }}>

@@ -429,4 +429,58 @@ describe("ARASAKA Engine & Simulation Verification (V-01 .. V-10)", () => {
     bridge.log_escalation("shelter", 3, "Crew unresponsive >45s during SPE");
     expect(bridge.get_events("unresponsive_crew_escalation").length).toBe(1);
   });
+
+  it("V-14: Concurrent events (S-01 + S-14 and S-02 CO2 purge) fully resolve with zero ghost re-triggers", () => {
+    const eng = new CrewHealthEngine();
+    const sim = new MissionSimulator(eng);
+    eng.onStepMitigation = (p, s) => sim.applyMitigationForStep(p, s, false);
+    const bridge = new AssistantEngineBridge(eng);
+    const client = new AzureProxyClient("http://127.0.0.1:0");
+    const voice = new VoiceService(client);
+    const controller = new AssistantController(bridge, client, voice);
+    sim.enterEvaSurface();
+
+    // Wire live alert listener like App.tsx does
+    eng.subscribe((next) => controller.onAlertsUpdated(next.activeAlerts));
+
+    // Fire BOTH S-01 (shelter) and S-14 (air_check) concurrently
+    sim.firePreset("S-01", "forward");
+    sim.firePreset("S-14", "forward");
+    sim.jumpForward(15 * 60);
+
+    const stateAfterDual = eng.getLiveState();
+    expect(stateAfterDual.activeProtocol?.id).toBe("air_check");
+    expect(stateAfterDual.pausedProtocols.some((p) => p.id === "shelter")).toBe(true);
+
+    // Complete all steps of air_check (3 steps)
+    for (let i = 0; i < 3; i++) {
+      controller.confirmCurrentProtocolStep();
+    }
+
+    // Should now seamlessly promote shelter with air cleared and S-14 marked solved
+    expect(eng.getLiveState().activeProtocol?.id).toBe("shelter");
+    expect(sim.getActivePresetIds()).not.toContain("S-14");
+
+    // Complete all steps of shelter (3 steps)
+    for (let i = 0; i < 3; i++) {
+      controller.confirmCurrentProtocolStep();
+    }
+
+    // Both events must now be completely solved and stay solved across subsequent ticks
+    expect(sim.getActivePresetIds()).toHaveLength(0);
+    expect(eng.getLiveState().activeAlerts).toHaveLength(0);
+    sim.jumpForward(5 * 60);
+    expect(eng.getLiveState().activeAlerts).toHaveLength(0);
+
+    // Verify S-02 CO2 1-hr rolling buffer purge also stays cleared after finishing air_check
+    sim.firePreset("S-02", "forward");
+    sim.jumpForward(60 * 60);
+    expect(eng.getLiveState().activeProtocol?.id).toBe("air_check");
+    for (let i = 0; i < 3; i++) {
+      controller.confirmCurrentProtocolStep();
+    }
+    expect(eng.getLiveState().activeAlerts).toHaveLength(0);
+    sim.jumpForward(5 * 60);
+    expect(eng.getLiveState().activeAlerts).toHaveLength(0);
+  });
 });

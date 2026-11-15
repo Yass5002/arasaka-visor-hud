@@ -190,6 +190,8 @@ export interface ActiveProtocolState {
   currentStep: ProtocolStep;
   completedSteps: number[];
   completed: boolean;
+  /** True when initiated automatically by a detector alert (auto-prunes if underlying alert resolves) */
+  autoTriggered?: boolean;
 }
 
 export interface LiveState {
