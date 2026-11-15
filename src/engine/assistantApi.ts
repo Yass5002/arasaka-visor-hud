@@ -10,6 +10,7 @@ import type {
   IndicatorSummary,
   LiveState,
   ProtocolId,
+  SuitActionName,
 } from "./types";
 
 /**
@@ -152,6 +153,20 @@ export class AssistantEngineBridge {
 
   public acknowledge(alertId: string): AlertObject | null {
     return this.engine.acknowledgeAlert(alertId);
+  }
+
+  public update_action_plan(
+    title: string,
+    currentAction: string,
+    confirmationPrompt?: string,
+    reason?: string,
+    protocolId?: ProtocolId
+  ): ActiveProtocolState {
+    return this.engine.updateActionPlan(title, currentAction, confirmationPrompt, reason, protocolId);
+  }
+
+  public execute_suit_action(action: SuitActionName) {
+    return this.engine.executeSuitAction(action);
   }
 
   public log_escalation(

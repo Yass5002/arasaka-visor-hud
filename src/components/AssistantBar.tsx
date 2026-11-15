@@ -20,6 +20,7 @@ export interface AssistantBarProps {
   onStopSpeaking: () => void;
   onConfirmStep: () => void;
   onAcknowledgeAlert: (alertId: string) => void;
+  onSilenceAlarms?: () => void;
   onOpenSimulation: () => void;
   onOpenTrends: () => void;
   onOpenSources: () => void;
@@ -36,6 +37,7 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
   onStopSpeaking,
   onConfirmStep,
   onAcknowledgeAlert,
+  onSilenceAlarms,
   onOpenSimulation,
   onOpenTrends,
   onOpenSources,
@@ -69,7 +71,7 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
             type="button"
             className="hds-btn hds-btn-primary"
             onClick={onOpenSimulation}
-            title="Open Simulation & Events Studio (Clock, Context, Presets, Sliders)"
+            title="Open Simulation & Events Studio (Clock, Context, Events, Sliders)"
           >
             Events
           </button>
@@ -156,13 +158,25 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
                 </span>
               )}
               {primary.state === "active" && (
-                <button
-                  type="button"
-                  className="chip-btn"
-                  onClick={() => onAcknowledgeAlert(primary.id)}
-                >
-                  Ack
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="chip-btn"
+                    onClick={() => onAcknowledgeAlert(primary.id)}
+                  >
+                    Ack
+                  </button>
+                  {onSilenceAlarms && (
+                    <button
+                      type="button"
+                      className="chip-btn"
+                      onClick={onSilenceAlarms}
+                      title="Mute repeating klaxon/caution horn"
+                    >
+                      Silence
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -183,9 +197,28 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
                 gap: 6,
               }}
             >
-              <div className="mono" style={{ fontSize: 11, color: "#02bfe7" }}>
-                PROTOCOL: {proto.name} ({proto.currentStepIndex + 1}/{proto.totalSteps})
+              <div
+                className="mono"
+                style={{
+                  fontSize: 11,
+                  color: proto.contingencyTitle ? "#ffb84d" : "#02bfe7",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 6,
+                }}
+              >
+                <span>
+                  {proto.contingencyTitle
+                    ? `${proto.contingencyTitle} (${proto.currentStepIndex + 1}/${proto.totalSteps})`
+                    : `PROTOCOL: ${proto.name} (${proto.currentStepIndex + 1}/${proto.totalSteps})`}
+                </span>
+                {proto.contingencyTitle && <span>AI ADAPTED</span>}
               </div>
+              {proto.contingencyReason && (
+                <div style={{ fontSize: 10.5, color: "#cbd5e1" }}>
+                  Pivot: {proto.contingencyReason}
+                </div>
+              )}
               <div style={{ fontSize: 12 }}>{proto.currentStep.instruction}</div>
               <button type="button" className="hds-btn hds-btn-primary" onClick={onConfirmStep}>
                 Confirm Step Complete

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AssistantController } from "../../assistant/assistantController";
 import { AzureProxyClient } from "../../assistant/azureClient";
+import { lookupManualTopic } from "../../assistant/flightManual";
 import { VoiceService } from "../../assistant/voiceService";
 import { AssistantEngineBridge } from "../assistantApi";
 import { BONE_LOSS_TABLE, ENGINE_LIMITS, INDICATOR_META } from "../config";
@@ -524,5 +525,67 @@ describe("ARASAKA Engine & Simulation Verification (V-01 .. V-10)", () => {
     // Only the step confirmation message should speak (1 call, interrupt = false)
     expect(spokenCalls.length - callsBeforeStep).toBe(1);
     expect(spokenCalls[spokenCalls.length - 1].interrupt).toBe(false);
+  });
+
+  it("V-16: Contingency improvisation pivots Plan A -> Plan B terrain shielding and silence_alarm works", async () => {
+    const eng = new CrewHealthEngine();
+    const sim = new MissionSimulator(eng);
+    eng.onStepMitigation = (p, s) => sim.applyMitigationForStep(p, s, false);
+    eng.onSuitAction = (act) => sim.executeSuitAction(act);
+    const bridge = new AssistantEngineBridge(eng);
+    const client = new AzureProxyClient("http://127.0.0.1:0");
+    const voice = new VoiceService(client);
+    const controller = new AssistantController(bridge, client, voice);
+    sim.enterEvaSurface();
+    eng.subscribe((next) => controller.onAlertsUpdated(next.activeAlerts));
+
+    sim.triggerLiveEvent("S-01");
+    sim.advanceTo(eng.getTime() + 60, 15);
+    const beforeDose = eng.getLiveState().indicators.dose_rate.value;
+    expect(beforeDose).toBeGreaterThan(2.0);
+    expect(eng.getLiveState().activeProtocol?.id).toBe("shelter");
+
+    // Crew rejects Plan A ("I can't make it back to the habitat in time!")
+    const reply = await controller.ask("I can't make it back to the habitat in time!");
+    expect(reply.toLowerCase()).toMatch(/plan b|crater|shield/);
+    const afterProto = eng.getLiveState().activeProtocol;
+    expect(afterProto?.contingencyTitle).toContain("PLAN B");
+    expect(afterProto?.currentStep.instruction.toLowerCase()).toMatch(/crater|rover|plss/);
+
+    // Terrain shielding physically attenuates SPE dose rate during subsequent ticks
+    sim.advanceTo(eng.getTime() + 15, 5);
+    expect(eng.getLiveState().indicators.dose_rate.value).toBeLessThan(beforeDose * 0.65);
+
+    // Voice silence command marks active alert acknowledged/silenced
+    await controller.ask("Mute alarm");
+    expect(eng.getLiveState().activeAlerts.every((a) => a.state === "acknowledged")).toBe(true);
+  });
+
+  it("V-17: triggerLiveEvent produces immediate hazard onset across S-02, S-03, S-14, S-06 & catalogue lists >=14 scenarios", () => {
+    expect(PRESET_CATALOGUE.length).toBeGreaterThanOrEqual(14);
+    expect(PRESET_CATALOGUE.some((p) => p.code === "S-03" && !p.name.toLowerCase().includes("preset"))).toBe(true);
+
+    for (const id of ["S-02", "S-03", "S-14", "S-06"]) {
+      const eng = new CrewHealthEngine();
+      const sim = new MissionSimulator(eng);
+      sim.enterEvaSurface();
+      sim.triggerLiveEvent(id);
+      sim.advanceTo(eng.getTime() + 2, 1);
+      expect(eng.getLiveState().activeAlerts.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("V-18: Operations manual lookup covers NASA-STD-3001 limits and Plan B contingency topics", () => {
+    for (const topic of [
+      "radiation_spe",
+      "suit_depressurization",
+      "co2_scrubber",
+      "hypoxia_pio2",
+      "exertion_cardio",
+      "all_limits",
+    ]) {
+      const doc = lookupManualTopic(topic);
+      expect(doc.length).toBeGreaterThan(40);
+    }
   });
 });

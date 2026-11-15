@@ -181,6 +181,15 @@ export interface ProtocolStep {
   confirmationPrompt: string;
 }
 
+export type SuitActionName =
+  | "engage_terrain_shield"
+  | "switch_secondary_o2"
+  | "open_loop_o2_purge"
+  | "seal_suit_breach"
+  | "rest_recovery_mode"
+  | "silence_alarm"
+  | "hail_flight_surgeon";
+
 export interface ActiveProtocolState {
   id: ProtocolId;
   name: string;
@@ -192,6 +201,9 @@ export interface ActiveProtocolState {
   completed: boolean;
   /** True when initiated automatically by a detector alert (auto-prunes if underlying alert resolves) */
   autoTriggered?: boolean;
+  /** Present when the AI improvised a Plan B contingency step */
+  contingencyTitle?: string;
+  contingencyReason?: string;
 }
 
 export interface LiveState {

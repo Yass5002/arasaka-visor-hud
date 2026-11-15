@@ -18,6 +18,25 @@ export class SuitAudioEngine {
   private micBuffer = new Uint8Array(64);
   private speechBuffer = new Uint8Array(64);
 
+  // Continuous immersive hazard soundscape nodes & schedulers
+  private fxGain: GainNode | null = null;
+  private leakNoiseGain: GainNode | null = null;
+  private leakNoiseSource: AudioBufferSourceNode | null = null;
+  private hazardTimer: ReturnType<typeof setInterval> | null = null;
+  private lastKlaxonAtMs = 0;
+  private lastCautionAtMs = 0;
+  private lastHeartbeatAtMs = 0;
+  private telemetryState = {
+    overallClass: 0 as 0 | 1 | 2 | 3,
+    hasUnackedAlert: false,
+    doseRateMsvDay: 0.6,
+    suitPressureKpa: 43,
+    isEva: true,
+    heartRateBpm: 72,
+    pio2MmHg: 150,
+    isAiSpeaking: false,
+  };
+
   public sfxEnabled = true;
   public radioFilterEnabled = true;
   public muted = false;
@@ -33,6 +52,10 @@ export class SuitAudioEngine {
       this.ctx = new Ctor();
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = this.muted ? 0 : 0.92;
+
+      this.fxGain = this.ctx.createGain();
+      this.fxGain.gain.value = 1.0;
+      this.fxGain.connect(this.masterGain);
 
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 128;
@@ -225,7 +248,7 @@ export class SuitAudioEngine {
     g.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
 
     osc.connect(g);
-    g.connect(this.masterGain);
+    g.connect(this.fxGain ?? this.masterGain);
     osc.start(now);
     osc.stop(now + durationSec + 0.02);
   }
@@ -273,7 +296,155 @@ export class SuitAudioEngine {
     this.scheduleTone(1174.66, 0.24, 0.14, "sine", 0.13);
   }
 
+  private ensureHazardLoop(): void {
+    if (this.hazardTimer || typeof window === "undefined") return;
+    this.hazardTimer = setInterval(() => {
+      this.tickHazardSoundscape();
+    }, 200);
+  }
+
+  private ensureLeakNoiseNode(): GainNode | null {
+    if (this.leakNoiseGain) return this.leakNoiseGain;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.fxGain) return null;
+
+    const bufferSize = ctx.sampleRate * 2;
+    const buf = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 2600;
+    bp.Q.value = 1.4;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+
+    src.connect(bp);
+    bp.connect(gain);
+    gain.connect(this.fxGain);
+    src.start();
+
+    this.leakNoiseSource = src;
+    this.leakNoiseGain = gain;
+    return gain;
+  }
+
+  private triggerGeigerClick(intensity01: number): void {
+    if (!this.sfxEnabled || this.muted || !this.ctx || !this.fxGain) return;
+    if (this.ctx.state !== "running") return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(2400 + Math.random() * 1400, now);
+    const peak = 0.02 + intensity01 * 0.045;
+    g.gain.setValueAtTime(peak, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.004);
+    osc.connect(g);
+    g.connect(this.fxGain);
+    osc.start(now);
+    osc.stop(now + 0.006);
+  }
+
+  private triggerHeartbeatPulse(): void {
+    this.scheduleTone(56, 0.0, 0.075, "sine", 0.075, 42);
+    this.scheduleTone(48, 0.14, 0.09, "sine", 0.055, 36);
+  }
+
+  private tickHazardSoundscape(): void {
+    const st = this.telemetryState;
+    if (!this.ctx || !this.fxGain || !this.sfxEnabled || this.muted) {
+      if (this.leakNoiseGain && this.ctx) {
+        this.leakNoiseGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06);
+      }
+      return;
+    }
+    if (this.ctx.state !== "running") return;
+
+    const nowMs = Date.now();
+    // Auto-duck background hazard SFX under AI radio speech
+    this.fxGain.gain.setTargetAtTime(st.isAiSpeaking ? 0.18 : 1.0, this.ctx.currentTime, 0.06);
+
+    // 1. Suit seal depressurization air-escape hiss
+    const leakGain = this.ensureLeakNoiseNode();
+    if (leakGain) {
+      const leakTarget =
+        st.isEva && st.suitPressureKpa < 37.5
+          ? Math.min(0.055, ((37.5 - st.suitPressureKpa) / 14) * 0.055)
+          : 0;
+      leakGain.gain.setTargetAtTime(leakTarget, this.ctx.currentTime, 0.08);
+    }
+
+    // 2. Repeating NASA Master Warning / Caution loops while hazard unacknowledged
+    if (st.hasUnackedAlert && !st.isAiSpeaking) {
+      if (st.overallClass === 1 && nowMs - this.lastKlaxonAtMs >= 4600) {
+        this.lastKlaxonAtMs = nowMs;
+        this.playAlertTone(1);
+      } else if (st.overallClass === 2 && nowMs - this.lastCautionAtMs >= 7200) {
+        this.lastCautionAtMs = nowMs;
+        this.playAlertTone(2);
+      }
+    }
+
+    // 3. Geiger dosimeter crackle during radiation surge
+    if (st.doseRateMsvDay > 1.35) {
+      const norm = Math.min(1, Math.log10(st.doseRateMsvDay) / 2.2);
+      const chance = 0.12 + norm * 0.78;
+      if (Math.random() < chance) {
+        this.triggerGeigerClick(norm);
+        if (norm > 0.5 && Math.random() < 0.45) {
+          setTimeout(() => this.triggerGeigerClick(norm * 0.8), 45 + Math.random() * 65);
+        }
+      }
+    }
+
+    // 4. Low heartbeat pulse on tachycardia (>138 bpm) or hypoxia (<127 mmHg)
+    if ((st.heartRateBpm > 138 || st.pio2MmHg < 127) && !st.isAiSpeaking) {
+      const intervalMs = Math.max(400, Math.round(60000 / Math.max(70, st.heartRateBpm)));
+      if (nowMs - this.lastHeartbeatAtMs >= intervalMs) {
+        this.lastHeartbeatAtMs = nowMs;
+        this.triggerHeartbeatPulse();
+      }
+    }
+  }
+
+  public syncTelemetryAudio(next: {
+    overallClass: 0 | 1 | 2 | 3;
+    hasUnackedAlert: boolean;
+    doseRateMsvDay: number;
+    suitPressureKpa: number;
+    isEva: boolean;
+    heartRateBpm: number;
+    pio2MmHg: number;
+    isAiSpeaking: boolean;
+  }): void {
+    this.telemetryState = next;
+    if (next.hasUnackedAlert || next.doseRateMsvDay > 1.35 || (next.isEva && next.suitPressureKpa < 37.5)) {
+      this.ensureHazardLoop();
+    }
+  }
+
   public dispose(): void {
+    if (this.hazardTimer) {
+      clearInterval(this.hazardTimer);
+      this.hazardTimer = null;
+    }
+    try {
+      this.leakNoiseSource?.stop();
+      this.leakNoiseSource?.disconnect();
+    } catch {
+      // ignore
+    }
+    this.leakNoiseSource = null;
+    this.leakNoiseGain = null;
     this.stopMicMeter();
     if (this.ctx) {
       this.ctx.close().catch(() => {});

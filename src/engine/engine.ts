@@ -24,11 +24,13 @@ import type {
   LiveState,
   MissionContext,
   ProtocolId,
+  SuitActionName,
 } from "./types";
 
 export class CrewHealthEngine {
   public readonly store: EngineStore;
   public onStepMitigation?: (protocolId: ProtocolId, stepIndex: number) => void;
+  public onSuitAction?: (action: SuitActionName) => { ok: boolean; effect: string };
   private currentT = 0;
   private listeners: Set<(state: LiveState) => void> = new Set();
   private cachedLiveState: LiveState;
@@ -367,6 +369,85 @@ export class CrewHealthEngine {
     alr.acknowledgedAt = this.currentT;
     this.notify();
     return alr;
+  }
+
+  public silenceAllAlerts(): void {
+    let changed = false;
+    for (const alr of this.store.activeAlerts) {
+      if (alr.state === "active") {
+        alr.state = "acknowledged";
+        alr.acknowledgedAt = this.currentT;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.notify();
+    }
+  }
+
+  /**
+   * Allows the live AI Assistant to dynamically rewrite the active guidance / Plan B
+   * step when crew constraints (e.g. "too far from habitat") invalidate Plan A.
+   */
+  public updateActionPlan(
+    title: string,
+    currentAction: string,
+    confirmationPrompt = "Confirm once executed.",
+    reason?: string,
+    protocolId?: ProtocolId
+  ): ActiveProtocolState {
+    if (!this.store.activeProtocol || this.store.activeProtocol.completed) {
+      const targetPid: ProtocolId =
+        protocolId ??
+        this.store.activeAlerts[0]?.protocolId ??
+        "shelter";
+      this.startProtocol(targetPid, true);
+    }
+
+    const active = this.store.activeProtocol!;
+    active.name = title.trim() || active.name;
+    active.contingencyTitle = title.trim() || "Plan B Adapted Guidance";
+    active.contingencyReason = reason?.trim();
+    active.currentStep = {
+      index: active.currentStepIndex,
+      instruction: currentAction.trim(),
+      confirmationPrompt: confirmationPrompt.trim(),
+    };
+
+    this.store.appendEvent(this.currentT, "assistant_said", {
+      event: "action_plan_updated",
+      protocolId: active.id,
+      title: active.name,
+      currentAction,
+      reason,
+    });
+    this.notify();
+    return active;
+  }
+
+  public executeSuitAction(action: SuitActionName): {
+    ok: boolean;
+    action: SuitActionName;
+    effect: string;
+  } {
+    let result: { ok: boolean; effect: string };
+    if (action === "silence_alarm") {
+      this.silenceAllAlerts();
+      result = { ok: true, effect: "Caution & Warning acoustic alarms silenced." };
+    } else if (this.onSuitAction) {
+      result = this.onSuitAction(action);
+    } else {
+      result = { ok: true, effect: `Suit command ${action} recorded.` };
+    }
+
+    this.store.appendEvent(this.currentT, "assistant_said", {
+      event: "suit_action_executed",
+      action,
+      ok: result.ok,
+      effect: result.effect,
+    });
+    this.notify();
+    return { ok: result.ok, action, effect: result.effect };
   }
 
   // =========================================================================

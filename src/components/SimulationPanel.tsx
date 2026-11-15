@@ -13,6 +13,7 @@ export interface SimulationPanelProps {
   speed: ClockSpeed;
   onTogglePlay: () => void;
   onSetSpeed: (speed: ClockSpeed) => void;
+  onTriggerEvent?: (presetId: string) => void;
 }
 
 const AREA_LABELS: Record<HealthArea, string> = {
@@ -37,6 +38,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
   speed,
   onTogglePlay,
   onSetSpeed,
+  onTriggerEvent,
 }) => {
   const [selectedArea, setSelectedArea] = useState<HealthArea>("environment");
   const [sliderDrafts, setSliderDrafts] = useState<Partial<Record<IndicatorId, number>>>({});
@@ -81,7 +83,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
     }, 500);
   };
 
-  const renderPresetCard = (p: PresetDefinition) => {
+  const renderScenarioCard = (p: PresetDefinition) => {
     const isActive = activePresetIds.includes(p.id);
     return (
       <div key={p.id} className="preset-row">
@@ -91,7 +93,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
             <strong style={{ fontSize: 12.5 }}>{p.name}</strong>
           </div>
           <span className="mono" style={{ fontSize: 10, color: "#aeb0b5" }}>
-            {p.basis}
+            {p.scope === "eva_surface" ? "EVA" : "HAB/LONG"} · {p.basis}
           </span>
         </div>
         <p style={{ fontSize: 11.5, color: "#cbd5e1", lineHeight: 1.35 }}>{p.summary}</p>
@@ -99,9 +101,15 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
           <button
             type="button"
             className={`hds-btn ${isActive ? "hds-btn-primary" : ""}`}
-            onClick={() => simulator.firePreset(p.id, "forward")}
+            onClick={() => {
+              if (onTriggerEvent) {
+                onTriggerEvent(p.id);
+              } else {
+                simulator.triggerLiveEvent(p.id);
+              }
+            }}
           >
-            {isActive ? "Active · Re-run Forward" : "Run Forward"}
+            {isActive ? "Active · Re-trigger Event" : "Trigger Event"}
           </button>
           {p.supportsScenarioStart && (
             <button
@@ -109,7 +117,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
               className="hds-btn"
               onClick={() => simulator.firePreset(p.id, "scenario_start")}
             >
-              Scenario Start (Day {p.scenarioStartDays ?? 14})
+              Jump to Day {p.scenarioStartDays ?? 14}
             </button>
           )}
         </div>
@@ -117,15 +125,9 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
     );
   };
 
-  const fastPresets = PRESET_CATALOGUE.filter(
-    (p) => p.group === "fast_event" && p.scope === "eva_surface"
-  );
-  const slowPresets = PRESET_CATALOGUE.filter(
-    (p) => p.group === "slow_drift" && p.scope === "eva_surface"
-  );
-  const smartPresets = PRESET_CATALOGUE.filter(
-    (p) => p.group === "smart_case" && p.scope === "eva_surface"
-  );
+  const fastPresets = PRESET_CATALOGUE.filter((p) => p.group === "fast_event");
+  const slowPresets = PRESET_CATALOGUE.filter((p) => p.group === "slow_drift");
+  const smartPresets = PRESET_CATALOGUE.filter((p) => p.group === "smart_case");
 
   const areaIndicators = (Object.keys(INDICATOR_META) as IndicatorId[])
     .map((id) => INDICATOR_META[id])
@@ -242,31 +244,31 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
             </div>
           </section>
 
-          {/* Preset Events (Strictly Outside-Cabin Mars EVA Testable Scenarios) */}
+          {/* Simulation Event Scenarios (Full ARASAKA-SIM-001 S-01..S-15 Suite) */}
           <section className="hds-card">
             <div className="hds-card-title">
-              <span>Surface EVA Emergencies &amp; Suit Hazards</span>
+              <span>Emergency &amp; Acute Hazard Events</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {fastPresets.map(renderPresetCard)}
+              {fastPresets.map(renderScenarioCard)}
             </div>
           </section>
 
           <section className="hds-card">
             <div className="hds-card-title">
-              <span>Cumulative EVA Dose Limit</span>
+              <span>Long-Duration Drifts &amp; Deconditioning</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {slowPresets.map(renderPresetCard)}
+              {slowPresets.map(renderScenarioCard)}
             </div>
           </section>
 
           <section className="hds-card">
             <div className="hds-card-title">
-              <span>Multi-Hazard Cascade &amp; Context Guard</span>
+              <span>Multi-Hazard Cascades &amp; Context Guards</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {smartPresets.map(renderPresetCard)}
+              {smartPresets.map(renderScenarioCard)}
             </div>
           </section>
 
@@ -281,14 +283,14 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
                 className="hds-input"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Custom preset name..."
+                placeholder="Custom scenario name..."
               />
               <button
                 type="button"
                 className="hds-btn hds-btn-primary"
                 onClick={() => {
                   simulator.saveCustomPreset(customName);
-                  setCustomName("Saved Preset");
+                  setCustomName("Saved Scenario");
                 }}
               >
                 Save Current State
@@ -296,7 +298,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
             </div>
             {customPresets.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {customPresets.map(renderPresetCard)}
+                {customPresets.map(renderScenarioCard)}
               </div>
             )}
           </section>

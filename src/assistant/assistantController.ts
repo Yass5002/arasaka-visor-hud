@@ -1,7 +1,8 @@
 import type { AssistantEngineBridge } from "../engine/assistantApi";
 import { ENGINE_LIMITS } from "../engine/config";
-import type { AlertObject, IndicatorId, LiveState, ProtocolId } from "../engine/types";
+import type { AlertObject, IndicatorId, ProtocolId, SuitActionName } from "../engine/types";
 import { AzureProxyClient, type ChatMessage, type ChatToolSpec } from "./azureClient";
+import { MANUAL_CORE_BRIEF, lookupManualTopic } from "./flightManual";
 import type { SpeechUrgency, VoiceService } from "./voiceService";
 
 export interface AssistantCaptionState {
@@ -19,17 +20,18 @@ export interface AssistantCaptionState {
   unresponsiveEscalated?: boolean;
 }
 
-const SYSTEM_PROMPT = `You are the Arasaka EVA Suit Crew Health Assistant speaking over live helmet radio to an astronaut on the Mars surface (~12 min Earth reply delay; no evacuation).
-PERSONA & COMMUNICATION STYLE:
-- Address the astronaut naturally and respectfully as "Sir" (like JARVIS / NASA CAPCOM: calm, razor-sharp, zero fluff).
-- COMMUNICATE, DO NOT LECTURE. Put the required action FIRST, keep responses to 1-2 short direct sentences (under ~25 words whenever an alert is active). Never recite textbook background stats unless Sir explicitly asks for detailed numbers or history.
-STRICT SAFETY & TELEMETRY RULES (ARASAKA-ENG-001):
-1. NEVER diagnose. Say "readings are consistent with" or "indicates risk of"—NEVER say "you have".
-2. ALWAYS call tools to read live state, alerts, or history. Never invent numbers.
-3. State whether cited numbers are measured (sensed) or estimated (modelled) with mission clock when quoting telemetry.
-4. Guide ONE step at a time and wait for Sir to confirm.
-5. Keep slow modelled indices (bone loss, immune_index, cognitive_drift, sans_risk) off visor alerts unless asked.
-6. Only advise Flight Surgeon contact (~12 min delay) when serious escalation criteria apply.`;
+const SYSTEM_PROMPT = `${MANUAL_CORE_BRIEF}
+
+PERSONA & ADAPTIVE RESPONSE POLICY:
+- Address the crew member respectfully as "Sir" (calm JARVIS / NASA CAPCOM demeanor: authoritative, loyal, resourceful, zero fluff).
+- CRISIS BREVITY (when an unconfirmed Class 1/2 hazard is active or announcing an alert): ACTION FIRST in 1-2 tight spoken sentences (<25 words). NEVER dump a wall of telemetry numbers or textbook theory while Sir is in danger unless Sir asks for metrics or reasons.
+- ADAPT & IMPROVISE IMMEDIATELY: If Sir says Plan A is impossible ("can't make the habitat", "too far", "rover dead", "valve jammed", "still hypoxic"), NEVER repeat Plan A! Call lookup_manual if needed, call update_action_plan to replace the HUD protocol step with Plan B (terrain crater shielding, rover mass shielding, open-loop purge, secondary O2, suit patch, rest), and call execute_suit_action to activate suit hardware mitigations when appropriate.
+- DEPTH ON REQUEST: When Sir asks "why", "explain", "how does this work", "give me the numbers", "status report", or procedural/long-duration questions, call get_state / summarise / lookup_manual and give a detailed, grounded answer.
+- SAFETY INVARIANTS (ARASAKA-ENG-001):
+  1. Never diagnose — say "readings are consistent with" or "indicates risk of", never "you have".
+  2. Never invent numbers — read live values via tools and label measured (sensed) vs estimated (modelled) with mission clock when quoting metrics.
+  3. Guide one action step at a time during procedures.
+  4. Keep slow modelled indices (bone loss, immune_index, cognitive_drift, sans_risk) off visor alerts unless Sir asks.`;
 
 const ASSISTANT_TOOLS: ChatToolSpec[] = [
   {
@@ -39,6 +41,35 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
       description:
         "Get current live telemetry, EVA context, active alerts, active protocol, and queued paused protocols.",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "lookup_manual",
+      description:
+        "Look up authoritative NASA-STD-3001 limits, Plan B terrain/suit contingencies, and clinical rationale from the Operations Manual.",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: {
+            type: "string",
+            enum: [
+              "radiation_spe",
+              "suit_depressurization",
+              "co2_scrubber",
+              "hypoxia_pio2",
+              "exertion_cardio",
+              "orthostatic",
+              "sleep_circadian",
+              "bone_exercise",
+              "immune_sans",
+              "all_limits",
+            ],
+          },
+        },
+        required: ["topic"],
+      },
     },
   },
   {
@@ -145,6 +176,51 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_action_plan",
+      description:
+        "Replace the current HUD protocol instruction with an improvised Plan B when Sir reports Plan A is impossible or unsafe (e.g. too far from habitat, rover dead).",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short Plan B banner e.g. PLAN B: TERRAIN SHIELD" },
+          currentAction: { type: "string", description: "Immediate concise physical instruction for the visor HUD" },
+          confirmationPrompt: { type: "string", description: "What Sir should confirm once done" },
+          reason: { type: "string", description: "Why Plan A was adapted" },
+          protocolId: { type: "string" },
+        },
+        required: ["title", "currentAction"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "execute_suit_action",
+      description:
+        "Command immediate EVA suit hardware or alarm mitigation (shielding posture, secondary O2 tank, open-loop purge, seal assist, rest mode, silence alarm, hail flight surgeon).",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: [
+              "engage_terrain_shield",
+              "switch_secondary_o2",
+              "open_loop_o2_purge",
+              "seal_suit_breach",
+              "rest_recovery_mode",
+              "silence_alarm",
+              "hail_flight_surgeon",
+            ],
+          },
+        },
+        required: ["action"],
+      },
+    },
+  },
 ];
 
 function formatMissionClock(day: number, todSec: number): string {
@@ -173,6 +249,7 @@ export class AssistantController {
 
   // Prevents step-completion synchronous notify() from causing duplicate alert speech
   private suppressAlertSync = false;
+  private alertSpeechGen = 0;
 
   // Wall-clock NASA No-Response Escalation Ladder state
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -380,6 +457,10 @@ export class AssistantController {
       return;
     }
 
+    if (this.voice.busySpeaking) {
+      return;
+    }
+
     const silentSince = Math.max(
       this.hazardUnconfirmedSinceMs,
       this.lastCrewInteractionMs,
@@ -387,12 +468,13 @@ export class AssistantController {
     );
     const elapsedSec = (now - silentSince) / 1000;
 
-    // Stage 1 (~14s): Direct action check-in
-    if (this.escalationStage === 0 && elapsedSec >= 14) {
+    // Stage 1 (~25s): Direct action check-in without repeating value dumps
+    if (this.escalationStage === 0 && elapsedSec >= 25) {
       this.escalationStage = 1;
-      const telemetryHint = this.buildLiveHazardTelemetryHint(live);
-      const stepHint = activeProto ? activeProto.currentStep.instruction : primary?.suggestedActions[0] ?? "Acknowledge";
-      const msg = `Sir, check in — ${telemetryHint}. ${stepHint} Say confirm.`;
+      const stepHint = activeProto?.contingencyTitle
+        ? activeProto.currentStep.instruction
+        : "Confirm action or report any obstacle.";
+      const msg = `Sir, status check. ${stepHint}`;
       this.voice.fx.playAlertTone(live.overallClass || 2);
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -407,11 +489,10 @@ export class AssistantController {
       return;
     }
 
-    // Stage 2 (~30s): Incapacitation check + backup order
-    if (this.escalationStage === 1 && elapsedSec >= 30) {
+    // Stage 2 (~50s): Incapacitation comms check
+    if (this.escalationStage === 1 && elapsedSec >= 50) {
       this.escalationStage = 2;
-      const hr = Math.round(live.indicators.heart_rate.value);
-      const msg = `Sir, respond now. Measured heart rate ${hr} bpm. Execute backup failsafe or confirm comms.`;
+      const msg = `Sir, respond now — comms check. Confirm status or engage suit failsafe.`;
       this.voice.fx.playAlertTone(1);
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -426,12 +507,13 @@ export class AssistantController {
       return;
     }
 
-    // Stage 3 (~46s+): Log unresponsive crew & hail Habitat / Flight Surgeon
-    if (this.escalationStage === 2 && elapsedSec >= 46) {
+    // Stage 3 (~75s+): Log unresponsive crew & hail Habitat / Flight Surgeon
+    if (this.escalationStage === 2 && elapsedSec >= 75) {
       this.escalationStage = 3;
       this.lastStage3PulseMs = now;
       const protoId = activeProto?.id ?? primary?.protocolId ?? "none";
-      this.bridge.log_escalation(protoId, 3, `Crew unresponsive >45s on ${primary?.title ?? protoId}`);
+      this.bridge.log_escalation(protoId, 3, `Crew unresponsive >75s on ${primary?.title ?? protoId}`);
+      this.bridge.execute_suit_action("hail_flight_surgeon");
       const msg = `No response, Sir. Hailing Habitat Flight Surgeon — 12-minute relay delay.`;
       this.voice.fx.playEscalationPulse();
       this.emitCaption({
@@ -448,26 +530,9 @@ export class AssistantController {
       return;
     }
 
-    if (this.escalationStage === 3 && now - this.lastStage3PulseMs >= 22000) {
+    if (this.escalationStage === 3 && now - this.lastStage3PulseMs >= 25000) {
       this.lastStage3PulseMs = now;
       this.voice.fx.playEscalationPulse();
-    }
-  }
-
-  private buildLiveHazardTelemetryHint(live: LiveState): string {
-    const primary = live.rankedPrimaryAlert;
-    if (!primary) return `HR ${Math.round(live.indicators.heart_rate.value)} bpm`;
-    switch (primary.area) {
-      case "radiation":
-        return `dose ${live.indicators.dose_rate.value.toFixed(1)} mSv/day`;
-      case "environment": {
-        const suitP = live.indicators.suit_pressure.value;
-        if (suitP < 31) return `suit ${suitP.toFixed(1)} kPa`;
-        if (live.indicators.pio2.value < 142) return `PIO₂ ${live.indicators.pio2.value.toFixed(0)} mmHg`;
-        return `ppCO₂ ${live.indicators.ppco2.value.toFixed(2)} mmHg`;
-      }
-      default:
-        return `HR ${Math.round(live.indicators.heart_rate.value)} bpm`;
     }
   }
 
@@ -477,17 +542,72 @@ export class AssistantController {
     extraQueued: number
   ): string {
     const leadMap: Record<string, string> = {
-      rad_spe_rate: `Solar flare, Sir — ${primary.whyLine}.`,
-      env_pressure_bounds: `Suit leak, Sir — ${primary.whyLine}.`,
-      env_pio2_low: `Oxygen dropping, Sir — ${primary.whyLine}.`,
-      env_ppco2_1h: `High CO₂, Sir — ${primary.whyLine}.`,
-      cv_context_hr: `High heart rate, Sir — ${primary.whyLine}.`,
-      cascade_coupled: `Multiple hazards, Sir — ${primary.whyLine}.`,
+      rad_spe_rate: "Solar flare, Sir.",
+      rad_dose_cum: "Career dose limit reached, Sir.",
+      env_pressure_bounds: "Suit leak detected, Sir.",
+      env_pio2_low: "Oxygen dropping, Sir.",
+      env_ppco2_1h: "CO2 rising, Sir.",
+      cv_context_hr: "Heart rate above EVA limit, Sir.",
+      cv_orthostatic: "Orthostatic instability flagged, Sir.",
+      cascade_coupled: "Multiple suit hazards, Sir.",
     };
-    const head = leadMap[primary.detectorId] ?? `${primary.title}, Sir — ${primary.whyLine}.`;
-    const action = stepInstruction || primary.suggestedActions[0] || "Check suit telemetry.";
-    const qNote = extraQueued > 0 ? ` (${extraQueued} more queued.)` : "";
+    const head = leadMap[primary.detectorId] ?? `${primary.title}, Sir.`;
+    const action = stepInstruction || primary.suggestedActions[0] || "Check suit status.";
+    const qNote = extraQueued > 0 ? ` (${extraQueued} queued.)` : "";
     return `${head} ${action}${qNote}`;
+  }
+
+  private async generateDynamicAlertCallout(
+    gen: number,
+    primary: AlertObject,
+    stepInstruction: string,
+    extraQueued: number,
+    fallbackMsg: string
+  ): Promise<void> {
+    let spoken = fallbackMsg;
+    try {
+      const live = this.bridge.get_state();
+      const clock = formatMissionClock(live.missionDay, live.timeOfDaySec);
+      const alertSummary = `${primary.title} (Class ${primary.class}): ${primary.whyLine}`;
+      const queueHint = extraQueued > 0 ? ` (+${extraQueued} additional alerts queued)` : "";
+      const promptMsg: ChatMessage = {
+        role: "user",
+        content:
+          `[LIVE ALERT @ ${clock}] ${alertSummary}${queueHint}. Recommended next action: "${stepInstruction || primary.suggestedActions[0] || "Assess suit"}". ` +
+          `Give Sir an immediate 1-2 sentence spoken radio callout (<25 words): action FIRST, calm JARVIS/NASA CAPCOM style, NO value lecture.`,
+      };
+      const { message } = await this.client.chatCompletion(
+        [this.history[0], ...this.history.slice(-4), promptMsg],
+        []
+      );
+      if (gen !== this.alertSpeechGen) return;
+      const aiText = message.content?.trim();
+      if (aiText && aiText.length >= 8) {
+        spoken = aiText;
+        this.history = [
+          this.history[0],
+          ...this.history.slice(-6),
+          { role: "assistant", content: spoken },
+        ];
+      }
+      this.emitCaption({ cloudStatus: "ready" });
+    } catch {
+      if (gen !== this.alertSpeechGen) return;
+      spoken = fallbackMsg;
+    }
+
+    if (gen !== this.alertSpeechGen) return;
+    this.emitCaption({
+      speaker: "ASSISTANT",
+      text: spoken,
+      timestampT: this.bridge.get_state().t,
+      alertClass: primary.class,
+      escalationStage: 0,
+      unresponsiveEscalated: false,
+    });
+    if (this.voice.enabled && this.voice.autoSpeakAlerts) {
+      void this.voice.speak(spoken, classToUrgency(primary.class), false);
+    }
   }
 
   /**
@@ -510,6 +630,7 @@ export class AssistantController {
     }
 
     if (alerts.length === 0) {
+      this.alertSpeechGen++;
       this.escalationStage = 0;
       if (this.caption.unresponsiveEscalated || this.caption.alertClass !== 0) {
         const live = this.bridge.get_state();
@@ -596,7 +717,7 @@ export class AssistantController {
     }
 
     const extraQueued = Math.max(0, distinctProtocols.length - 1);
-    const msg = this.buildTacticalCallout(primary, stepInstruction, extraQueued);
+    const fallbackMsg = this.buildTacticalCallout(primary, stepInstruction, extraQueued);
 
     const live = this.bridge.get_state();
     this.bridge.log_activity("activity_start", { event: "alert_announced", alertId: primary.id });
@@ -608,19 +729,36 @@ export class AssistantController {
       this.voice.fx.playAlertTone(primary.class);
     }
 
+    const useLiveLlm =
+      this.caption.cloudStatus !== "fallback" &&
+      !this.client.getBaseUrl().includes("127.0.0.1:0");
+
+    if (!useLiveLlm) {
+      this.emitCaption({
+        speaker: "ASSISTANT",
+        text: fallbackMsg,
+        timestampT: live.t,
+        alertClass: primary.class,
+        escalationStage: 0,
+        unresponsiveEscalated: false,
+      });
+      if (this.voice.enabled && this.voice.autoSpeakAlerts) {
+        void this.voice.speak(fallbackMsg, classToUrgency(primary.class), false);
+      }
+      return;
+    }
+
+    // Live AI proxy mode: display immediate concise action banner, then speak dynamically via GPT tool persona once
     this.emitCaption({
       speaker: "ASSISTANT",
-      text: msg,
+      text: fallbackMsg,
       timestampT: live.t,
       alertClass: primary.class,
       escalationStage: 0,
       unresponsiveEscalated: false,
     });
-
-    if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-      // Queue FIFO strictly without interrupting active transmissions
-      void this.voice.speak(msg, classToUrgency(primary.class), false);
-    }
+    const gen = ++this.alertSpeechGen;
+    void this.generateDynamicAlertCallout(gen, primary, stepInstruction, extraQueued, fallbackMsg);
   }
 
   public confirmCurrentProtocolStep(): void {
@@ -686,8 +824,28 @@ export class AssistantController {
       isBusy: true,
     });
 
-    // Fast voice/text confirmation shortcut
+    // Fast silence/mute alarm command
+    if (/\b(mute alarm|silence alarm|stop alarm|quiet alarm|silence alerts)\b/i.test(trimmed)) {
+      this.bridge.execute_suit_action("silence_alarm");
+      this.voice.stopSpeech();
+      const silenceReply = "Alarms silenced, Sir.";
+      this.emitCaption({
+        speaker: "ASSISTANT",
+        text: silenceReply,
+        timestampT: this.bridge.get_state().t,
+        alertClass: this.bridge.get_state().overallClass,
+        isBusy: false,
+      });
+      return silenceReply;
+    }
+
+    // Fast voice/text confirmation shortcut (strictly guard against negative/obstacle phrases like "I can't make it")
+    const hasObstacleOrQuestion =
+      /\b(can't|cannot|won't|not|no|unable|impossible|far|stuck|broken|dead|hurt|dizzy|wait|why|how|what)\b/i.test(
+        trimmed
+      );
     if (
+      !hasObstacleOrQuestion &&
       live.activeProtocol &&
       !live.activeProtocol.completed &&
       /\b(confirm|inside|done|complete|completed|roger|copy|acknowledged|yes)\b/i.test(trimmed)
@@ -698,6 +856,7 @@ export class AssistantController {
     }
 
     if (
+      !hasObstacleOrQuestion &&
       !live.activeProtocol &&
       live.rankedPrimaryAlert &&
       /\b(confirm|roger|copy|acknowledged|acknowledge)\b/i.test(trimmed)
@@ -840,18 +999,86 @@ export class AssistantController {
       }
       case "acknowledge":
         return this.bridge.acknowledge(String(args.alertId || ""));
+      case "lookup_manual":
+        return {
+          topic: String(args.topic || "all_limits"),
+          content: lookupManualTopic(String(args.topic || "all_limits")),
+        };
+      case "update_action_plan": {
+        const updated = this.bridge.update_action_plan(
+          String(args.title || "PLAN B ADAPTATION"),
+          String(args.currentAction || "Execute improvised contingency."),
+          args.confirmationPrompt ? String(args.confirmationPrompt) : undefined,
+          args.reason ? String(args.reason) : undefined,
+          args.protocolId ? (String(args.protocolId) as ProtocolId) : undefined
+        );
+        this.voice.fx.playStepConfirm();
+        return updated;
+      }
+      case "execute_suit_action": {
+        const act = String(args.action || "") as SuitActionName;
+        const res = this.bridge.execute_suit_action(act);
+        if (res.ok) {
+          this.voice.fx.playStepConfirm();
+        }
+        return res;
+      }
       default:
         return { error: `Unknown tool: ${name}` };
     }
   }
 
   /**
-   * Guarantees grounded, non-diagnostic replies if offline or before proxy setup (V-11).
+   * Guarantees grounded, adaptive, non-diagnostic replies if offline or before proxy setup (V-11).
    */
   public buildDeterministicFallback(question: string): string {
     const s = this.bridge.get_state();
     const clk = formatMissionClock(s.missionDay, s.timeOfDaySec);
     const q = question.toLowerCase();
+
+    // Adaptive offline contingency if crew reports obstacle to Plan A
+    if (/\b(can't|cannot|won't|impossible|too far|stuck|rover|make it|plan b)\b/.test(q)) {
+      const area = s.rankedPrimaryAlert?.area;
+      if (area === "radiation") {
+        this.bridge.execute_suit_action("engage_terrain_shield");
+        this.bridge.update_action_plan(
+          "PLAN B: TERRAIN SHIELDING",
+          "Drop into the nearest deep crater wall or rover belly, crouch PLSS-towards-Sun, and minimize horizon sky view.",
+          "In cover and braced",
+          "Habitat unreachable before flare peak"
+        );
+        return "Copy, Sir — pivoting to Plan B. Drop behind the nearest crater wall or rover chassis with PLSS facing solar flux now; shielding posture engaged.";
+      }
+      if (area === "environment" && s.indicators.suit_pressure.value < 35) {
+        this.bridge.execute_suit_action("seal_suit_breach");
+        this.bridge.execute_suit_action("switch_secondary_o2");
+        this.bridge.update_action_plan(
+          "PLAN B: SUIT PATCH & SECONDARY O2",
+          "Clamp torn suit segment with emergency cuff/tape; suit switched to Secondary O2 feed.",
+          "Leak slowed and pressure holding",
+          "Immediate isolation required away from airlock"
+        );
+        return "Copy, Sir — Secondary O2 and breach-isolation assist engaged. Clamp or tape the suit tear immediately and report pressure stability.";
+      }
+      if (area === "environment") {
+        this.bridge.execute_suit_action("open_loop_o2_purge");
+        this.bridge.update_action_plan(
+          "PLAN B: OPEN-LOOP PURGE",
+          "Maintain open-loop O2 helmet flush and pace breathing to conserve reserves.",
+          "Breathing clear",
+          "Primary air-return recovery unavailable"
+        );
+        return "Copy, Sir — open-loop O2 purge active. Slow your breathing and hold stationary while airflow clears.";
+      }
+      this.bridge.execute_suit_action("rest_recovery_mode");
+      this.bridge.update_action_plan(
+        "PLAN B: STATIONARY HOLD",
+        "Stop traversing, lock boot brakes, slow breathing, and wait for vitals stabilization.",
+        "Stable and rested",
+        "Crew unable to execute primary transit step"
+      );
+      return "Copy, Sir — stationary recovery engaged. Halt movement, brace on terrain, and let heart rate settle.";
+    }
 
     if (/dose|rad|shelter|dangerous|how long/.test(q)) {
       const rate = s.indicators.dose_rate;

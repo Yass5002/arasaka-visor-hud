@@ -7,6 +7,7 @@ import type {
   IndicatorSample,
   LocationType,
   ProtocolId,
+  SuitActionName,
 } from "../engine/types";
 import { PRESET_CATALOGUE, type PresetDefinition } from "./presets";
 
@@ -35,6 +36,7 @@ export class MissionSimulator {
 
   private activePresets: ActivePresetInstance[] = [];
   private mitigatedPresets = new Set<string>();
+  private activeSuitActions = new Set<SuitActionName>();
   private manualOverrides: Partial<Record<IndicatorId, number>> = {};
   private manualContextLock: { activity: ActivityType; location: LocationType } | null = null;
   private snapshots: EngineSnapshot[] = [];
@@ -503,9 +505,113 @@ export class MissionSimulator {
     this.stepSimulation(nowT);
   }
 
+  /**
+   * Launches an event for live interactive demonstrations so slow-ramping or
+   * multi-day anomalies enter active threshold onset immediately (< 2 s) without
+   * waiting minutes/days at 1x real time. Unit tests continue to use firePreset().
+   */
+  public triggerLiveEvent(presetId: string): { suggestedSpeed?: ClockSpeed } {
+    const def =
+      PRESET_CATALOGUE.find((p) => p.id === presetId) ??
+      this.customPresets.find((p) => p.id === presetId);
+    if (!def) return {};
+
+    if (def.supportsScenarioStart) {
+      this.firePreset(def.id, "scenario_start");
+      return { suggestedSpeed: def.recommendedSpeed ?? 86400 };
+    }
+
+    if (def.id === "S-02") {
+      // Seed clean nominal air first if sparse, fire S-02, then advance 48 min silently to Class 3 cusp -> live alert
+      this.firePreset("S-02", "forward");
+      const start = this.engine.getTime();
+      for (let dt = 60; dt < 48 * 60; dt += 60) {
+        this.stepSimulation(start + dt, false);
+      }
+      this.stepSimulation(start + 48 * 60, true);
+      return { suggestedSpeed: 60 };
+    }
+
+    if (def.id === "S-03") {
+      this.firePreset("S-03", "forward");
+      const start = this.engine.getTime();
+      for (let dt = 30; dt < 210; dt += 30) {
+        this.stepSimulation(start + dt, false);
+      }
+      this.stepSimulation(start + 210, true);
+      return { suggestedSpeed: 60 };
+    }
+
+    if (def.id === "S-14") {
+      this.firePreset("S-14", "forward");
+      const start = this.engine.getTime();
+      for (let dt = 30; dt < 270; dt += 30) {
+        this.stepSimulation(start + dt, false);
+      }
+      this.stepSimulation(start + 270, true);
+      return { suggestedSpeed: 60 };
+    }
+
+    this.firePreset(def.id, "forward");
+    return { suggestedSpeed: def.recommendedSpeed };
+  }
+
+  public executeSuitAction(action: SuitActionName): { ok: boolean; effect: string } {
+    this.activeSuitActions.add(action);
+    const nowT = this.engine.getTime();
+    let effect = `Executed ${action}.`;
+
+    switch (action) {
+      case "engage_terrain_shield": {
+        this.mitigatedPresets.add("S-01");
+        this.mitigatedPresets.add("S-12");
+        this.activePresets = this.activePresets.filter((p) => p.id !== "S-01" && p.id !== "S-12");
+        effect = "Terrain/PLSS shielding active (~82% particle flux attenuation).";
+        break;
+      }
+      case "switch_secondary_o2": {
+        this.mitigatedPresets.add("S-03");
+        this.activePresets = this.activePresets.filter((p) => p.id !== "S-03");
+        effect = "Switched to secondary high-pressure O₂ feed; inspired PIO₂ restoring to 152 mmHg.";
+        break;
+      }
+      case "open_loop_o2_purge": {
+        this.mitigatedPresets.add("S-02");
+        this.activePresets = this.activePresets.filter((p) => p.id !== "S-02");
+        this.engine.store.rollingWindowFloorByIndicator.ppco2 = nowT;
+        effect = "Open-loop O₂ purge flushing helmet CO₂ toward 1.55 mmHg baseline.";
+        break;
+      }
+      case "seal_suit_breach": {
+        this.mitigatedPresets.add("S-14");
+        this.activePresets = this.activePresets.filter((p) => p.id !== "S-14");
+        effect = "Bypass isolation & emergency patch engaged; suit pressure stabilizing ~41.2 kPa.";
+        break;
+      }
+      case "rest_recovery_mode": {
+        this.mitigatedPresets.add("S-04");
+        this.activePresets = this.activePresets.filter((p) => p.id !== "S-04");
+        effect = "EVA exertion hold active; heart rate and O₂ consumption trending toward baseline.";
+        break;
+      }
+      case "hail_flight_surgeon": {
+        effect = "Telemetry burst queued on high-gain antenna for Habitat CMO / Flight Surgeon (~12 min relay).";
+        break;
+      }
+      case "silence_alarm": {
+        effect = "Master Caution & Warning audio loops muted.";
+        break;
+      }
+    }
+
+    this.stepSimulation(nowT, false);
+    return { ok: true, effect };
+  }
+
   public clearPresets(): void {
     this.activePresets = [];
     this.mitigatedPresets.clear();
+    this.activeSuitActions.clear();
     this.manualOverrides = {};
     this.manualContextLock = null;
     this.stepSimulation(this.engine.getTime());
@@ -600,6 +706,7 @@ export class MissionSimulator {
     this.playing = false;
     this.activePresets = [];
     this.mitigatedPresets.clear();
+    this.activeSuitActions.clear();
     this.manualOverrides = {};
     this.manualContextLock = null;
     this.lastDailySnapshotDay = 0;

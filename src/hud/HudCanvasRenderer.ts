@@ -437,16 +437,18 @@ export class HudCanvasRenderer {
     ctx.fillStyle = "#ffffff";
     ctx.font = `600 ${Math.round(H * 0.014)}px "Public Sans", sans-serif`;
     const whyText = escalated
-      ? "No crew confirmation >45 s · Telemetry packet queued (~12 min delay)"
+      ? "No crew confirmation >75 s · Telemetry packet queued (~12 min delay)"
       : this.truncateText(ctx, primary!.whyLine, w * 0.90);
     ctx.fillText(whyText, x + w * 0.045, y + h * 0.53);
 
-    // Line 3: Protocol step prompt or top suggested action
-    ctx.fillStyle = theme.text;
+    // Line 3: Protocol step prompt (or AI-adapted Plan B) or top suggested action
+    ctx.fillStyle = protocol?.contingencyTitle ? "#ffb84d" : theme.text;
     ctx.font = `600 ${Math.round(H * 0.0132)}px "DM Mono", ui-monospace, monospace`;
     const actionLine =
       protocol && !protocol.completed
-        ? `STEP ${protocol.currentStepIndex + 1}/${protocol.totalSteps}: ${protocol.currentStep.instruction}`
+        ? protocol.contingencyTitle
+          ? `${protocol.contingencyTitle}: ${protocol.currentStep.instruction}`
+          : `STEP ${protocol.currentStepIndex + 1}/${protocol.totalSteps}: ${protocol.currentStep.instruction}`
         : primary?.suggestedActions[0] ?? "Say CONFIRM or acknowledge immediately";
     ctx.fillText(this.truncateText(ctx, actionLine, w * 0.90), x + w * 0.045, y + h * 0.81);
     ctx.restore();

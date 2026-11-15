@@ -40,6 +40,7 @@ export function App() {
     engine.onStepMitigation = (protoId, stepIdx) => {
       simulator.applyMitigationForStep(protoId, stepIdx, false);
     };
+    engine.onSuitAction = (action) => simulator.executeSuitAction(action);
     const bridge = new AssistantEngineBridge(engine);
     const client = new AzureProxyClient();
     const voice = new VoiceService(client);
@@ -106,18 +107,39 @@ export function App() {
     simulator.speed = speed;
   }, [simulator, playing, speed, phase]);
 
+  const syncAcousticTelemetry = useCallback(
+    (st: LiveState) => {
+      if (phase !== "live") return;
+      voice.fx.syncTelemetryAudio({
+        overallClass: st.overallClass,
+        hasUnackedAlert: st.activeAlerts.some((a) => a.state === "active"),
+        doseRateMsvDay: st.indicators.dose_rate.value,
+        suitPressureKpa: st.indicators.suit_pressure.value,
+        isEva: st.context.activity === "eva",
+        heartRateBpm: st.indicators.heart_rate.value,
+        pio2MmHg: st.indicators.pio2.value,
+        isAiSpeaking: voice.busySpeaking || Boolean(captionRef.current?.isSpeaking),
+      });
+    },
+    [phase, voice]
+  );
+
   useEffect(() => {
     const unsubEngine = engine.subscribe((next) => {
       liveStateRef.current = next;
       setLiveState(next);
       if (phase === "live") {
         assistant.onAlertsUpdated(next.activeAlerts);
+        syncAcousticTelemetry(next);
       }
     });
 
     const unsubCaption = assistant.subscribe((cap) => {
       captionRef.current = cap;
       setCaptionState(cap);
+      if (liveStateRef.current) {
+        syncAcousticTelemetry(liveStateRef.current);
+      }
       const dedupeKey = `${cap.speaker}:${cap.text}`;
       if (cap.text && dedupeKey !== lastLoggedMsgRef.current) {
         lastLoggedMsgRef.current = dedupeKey;
@@ -138,7 +160,7 @@ export function App() {
       unsubEngine();
       unsubCaption();
     };
-  }, [engine, assistant, phase]);
+  }, [engine, assistant, phase, syncAcousticTelemetry]);
 
   useEffect(() => {
     if (phase !== "live") return;
@@ -150,9 +172,10 @@ export function App() {
       if (simulator.playing) {
         simulator.tickRealTime(dt);
       }
+      syncAcousticTelemetry(engine.getLiveState());
     }, 250);
     return () => window.clearInterval(timer);
-  }, [simulator, phase]);
+  }, [simulator, engine, phase, syncAcousticTelemetry]);
 
   useEffect(() => {
     return () => {
@@ -168,6 +191,19 @@ export function App() {
     setPhase("live");
     assistant.enterSuitSilent(openMicOnLaunch);
   }, [preload.ready, assistant, simulator, voice, openMicOnLaunch]);
+
+  const handleTriggerEvent = useCallback(
+    (presetId: string) => {
+      voice.unlockAudio();
+      const res = simulator.triggerLiveEvent(presetId);
+      setPlaying(true);
+      if (res.suggestedSpeed !== undefined) {
+        setSpeed(res.suggestedSpeed);
+      }
+      syncAcousticTelemetry(engine.getLiveState());
+    },
+    [simulator, engine, voice, syncAcousticTelemetry]
+  );
 
   const sampleAudioLevels = useCallback(() => {
     return {
@@ -213,6 +249,7 @@ export function App() {
         onStopSpeaking={() => voice.stopSpeech()}
         onConfirmStep={() => assistant.confirmCurrentProtocolStep()}
         onAcknowledgeAlert={(id) => engine.acknowledgeAlert(id)}
+        onSilenceAlarms={() => engine.silenceAllAlerts()}
         onOpenSimulation={() => setSimulationOpen(true)}
         onOpenTrends={() => setTrendsOpen(true)}
         onOpenSources={() => setSourcesOpen(true)}
@@ -229,6 +266,7 @@ export function App() {
         speed={speed}
         onTogglePlay={() => setPlaying((p) => !p)}
         onSetSpeed={(s) => setSpeed(s)}
+        onTriggerEvent={handleTriggerEvent}
       />
 
       {/* Dedicated Technical & Voice Settings Modal */}
