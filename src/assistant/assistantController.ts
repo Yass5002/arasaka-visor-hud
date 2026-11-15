@@ -167,6 +167,8 @@ export class AssistantController {
 
   private history: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }];
   private lastAnnouncedAlertIds = new Set<string>();
+  private announcedDetectorClass = new Map<string, number>();
+  private lastDetectorAnnouncedAtMs = new Map<string, number>();
   private captionListeners = new Set<(cap: AssistantCaptionState) => void>();
 
   // Prevents step-completion synchronous notify() from causing duplicate alert speech
@@ -177,6 +179,7 @@ export class AssistantController {
   private hazardTrackingKey: string | null = null;
   private hazardUnconfirmedSinceMs = 0;
   private lastCrewInteractionMs = Date.now();
+  private lastAiBusyAtMs = 0;
   private lastStage3PulseMs = 0;
   private escalationStage: 0 | 1 | 2 | 3 = 0;
 
@@ -364,6 +367,12 @@ export class AssistantController {
       ? `${activeProto.id}:${activeProto.currentStepIndex}`
       : `${primary!.id}:${primary!.class}`;
     const now = Date.now();
+    // Never count silence or stack escalation prompts while AI is actively speaking or synthesizing
+    if (this.voice.busySpeaking) {
+      this.lastAiBusyAtMs = now;
+      return;
+    }
+
     if (this.hazardTrackingKey !== key) {
       this.hazardTrackingKey = key;
       this.hazardUnconfirmedSinceMs = now;
@@ -371,7 +380,11 @@ export class AssistantController {
       return;
     }
 
-    const silentSince = Math.max(this.hazardUnconfirmedSinceMs, this.lastCrewInteractionMs);
+    const silentSince = Math.max(
+      this.hazardUnconfirmedSinceMs,
+      this.lastCrewInteractionMs,
+      this.lastAiBusyAtMs
+    );
     const elapsedSec = (now - silentSince) / 1000;
 
     // Stage 1 (~14s): Direct action check-in
@@ -408,7 +421,7 @@ export class AssistantController {
         escalationStage: 2,
       });
       if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-        void this.voice.speak(msg, "emergency", true);
+        void this.voice.speak(msg, "emergency", false);
       }
       return;
     }
@@ -430,7 +443,7 @@ export class AssistantController {
         unresponsiveEscalated: true,
       });
       if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-        void this.voice.speak(msg, "emergency", true);
+        void this.voice.speak(msg, "emergency", false);
       }
       return;
     }
@@ -484,9 +497,15 @@ export class AssistantController {
    */
   public onAlertsUpdated(alerts: AlertObject[]): void {
     const activeIds = new Set(alerts.map((a) => a.id));
+    const activeDetectors = new Set(alerts.map((a) => a.detectorId));
     for (const oldId of this.lastAnnouncedAlertIds) {
       if (!activeIds.has(oldId)) {
         this.lastAnnouncedAlertIds.delete(oldId);
+      }
+    }
+    for (const det of Array.from(this.announcedDetectorClass.keys())) {
+      if (!activeDetectors.has(det)) {
+        this.announcedDetectorClass.delete(det);
       }
     }
 
@@ -515,15 +534,31 @@ export class AssistantController {
     }
 
     const primary = alerts[0];
-    const isNewPrimary = !this.lastAnnouncedAlertIds.has(primary.id);
-    if (!isNewPrimary) {
-      // Even if primary didn't change, ensure any newly added concurrent protocol is queued
+    const nowWall = Date.now();
+    const prevDetClass = this.announcedDetectorClass.get(primary.detectorId);
+    const lastDetAt = this.lastDetectorAnnouncedAtMs.get(primary.detectorId) ?? 0;
+    const escalatedToEmergency =
+      prevDetClass !== undefined && prevDetClass > primary.class && primary.class === 1 && nowWall - lastDetAt >= 8000;
+    const isUnannouncedPrimary =
+      (!this.lastAnnouncedAlertIds.has(primary.id) && prevDetClass === undefined) || escalatedToEmergency;
+
+    if (!isUnannouncedPrimary) {
       for (const pid of distinctProtocols) {
         this.bridge.queue_protocol(pid, true);
       }
+      this.lastAnnouncedAlertIds.add(primary.id);
       return;
     }
-    this.lastAnnouncedAlertIds.add(primary.id);
+
+    // Record ALL currently active alerts so dismantling cascade_coupled doesn't re-announce already-queued alerts
+    for (const alr of alerts) {
+      this.lastAnnouncedAlertIds.add(alr.id);
+      const existingCls = this.announcedDetectorClass.get(alr.detectorId);
+      if (existingCls === undefined || alr.class < existingCls) {
+        this.announcedDetectorClass.set(alr.detectorId, alr.class);
+      }
+      this.lastDetectorAnnouncedAtMs.set(alr.detectorId, nowWall);
+    }
 
     // If this alert arrived synchronously during confirmCurrentProtocolStep, let confirmCurrentProtocolStep speak cleanly once!
     if (this.suppressAlertSync) {
@@ -565,7 +600,8 @@ export class AssistantController {
 
     const live = this.bridge.get_state();
     this.bridge.log_activity("activity_start", { event: "alert_announced", alertId: primary.id });
-    this.hazardUnconfirmedSinceMs = Date.now();
+    this.hazardUnconfirmedSinceMs = nowWall;
+    this.lastAiBusyAtMs = nowWall;
     this.escalationStage = 0;
 
     if (this.voice.enabled) {
@@ -582,7 +618,8 @@ export class AssistantController {
     });
 
     if (this.voice.enabled && this.voice.autoSpeakAlerts) {
-      void this.voice.speak(msg, classToUrgency(primary.class), primary.class === 1);
+      // Queue FIFO strictly without interrupting active transmissions
+      void this.voice.speak(msg, classToUrgency(primary.class), false);
     }
   }
 
@@ -699,8 +736,7 @@ export class AssistantController {
       isBusy: false,
     });
     if (this.voice.enabled) {
-      // User-requested query plays directly cleanly (interrupt = true if responding to new crew question)
-      void this.voice.speak(reply, classToUrgency(post.overallClass), true);
+      void this.voice.speak(reply, classToUrgency(post.overallClass), false);
     }
     return reply;
   }

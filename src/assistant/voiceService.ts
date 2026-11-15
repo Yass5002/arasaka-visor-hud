@@ -77,13 +77,20 @@ export class VoiceService {
   private keepListening = false;
   private micCallbacks: DuplexMicCallbacks | null = null;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private activeRecCtor: (new () => SpeechRecognitionLike) | null = null;
+  private isTxActive = false;
+  private micCooldownUntilMs = 0;
 
   private currentAudioUrl: string | null = null;
   private player: HTMLAudioElement | null = null;
   private speechGeneration = 0;
   private speechQueueTail: Promise<void> = Promise.resolve();
+  private pendingSpeechCount = 0;
+  private pendingNormalizedTexts = new Set<string>();
+  private recentSpokenNormalized: string[] = [];
+  private activeUrgency: SpeechUrgency = "nominal";
+  private settleCurrentPlayback: (() => void) | null = null;
   private isSpeaking = false;
-  private lastSpokenNormalized = "";
   private lastSpokeEndedAtMs = 0;
 
   public onSpeakingChange?: (speaking: boolean) => void;
@@ -103,6 +110,10 @@ export class VoiceService {
 
   public get speaking(): boolean {
     return this.isSpeaking;
+  }
+
+  public get busySpeaking(): boolean {
+    return this.isSpeaking || this.isTxActive || this.pendingSpeechCount > 0;
   }
 
   public get listening(): boolean {
@@ -146,11 +157,63 @@ export class VoiceService {
     this.onSpeakingChange?.(speaking);
   }
 
+  private pauseRecognitionForTx(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    if (this.activeRecognition) {
+      const rec = this.activeRecognition;
+      this.activeRecognition = null;
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      try {
+        rec.abort?.();
+        rec.stop();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private scheduleRecognitionResumeAfterTx(delayMs = 850): void {
+    if (!this.keepListening || !this.activeRecCtor || this.isTxActive || this.pendingSpeechCount > 0) {
+      return;
+    }
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+    }
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.keepListening && this.activeRecCtor && !this.isTxActive && this.pendingSpeechCount === 0) {
+        this.spawnRecognitionInstance(this.activeRecCtor);
+      }
+    }, delayMs);
+  }
+
   public stopSpeech(): void {
     this.speechGeneration += 1;
     this.speechQueueTail = Promise.resolve();
+    this.pendingSpeechCount = 0;
+    this.pendingNormalizedTexts.clear();
+    this.isTxActive = false;
+    this.activeUrgency = "nominal";
+
+    const settle = this.settleCurrentPlayback;
+    this.settleCurrentPlayback = null;
+    if (settle) {
+      try {
+        settle();
+      } catch {
+        // ignore
+      }
+    }
+
     if (this.player) {
       try {
+        this.player.onended = null;
+        this.player.onerror = null;
         this.player.pause();
         this.player.currentTime = 0;
       } catch {
@@ -165,6 +228,8 @@ export class VoiceService {
       window.speechSynthesis.cancel();
     }
     this.setSpeaking(false);
+    this.micCooldownUntilMs = Date.now() + 300;
+    this.scheduleRecognitionResumeAfterTx(300);
   }
 
   public speak(
@@ -176,14 +241,41 @@ export class VoiceService {
       return Promise.resolve();
     }
 
-    if (interrupt) {
+    const norm = normalizeForEcho(text);
+    if (!norm) return Promise.resolve();
+
+    // Never allow a lower/equal-urgency automated call to chop an active emergency mid-sentence
+    const shouldInterrupt =
+      interrupt && !(this.busySpeaking && this.activeUrgency === "emergency" && urgency !== "nominal");
+
+    if (shouldInterrupt) {
       this.stopSpeech();
+    } else if (this.pendingNormalizedTexts.has(norm)) {
+      // Drop exact duplicate already speaking or sitting in the FIFO queue
+      return this.speechQueueTail;
     }
+
+    this.pendingNormalizedTexts.add(norm);
+    this.pendingSpeechCount += 1;
     const targetGen = this.speechGeneration;
 
     const job = async () => {
-      if (targetGen !== this.speechGeneration || !this.enabled) return;
-      await this.playUtteranceNow(text, urgency, targetGen);
+      try {
+        if (targetGen !== this.speechGeneration || !this.enabled) return;
+        this.isTxActive = true;
+        this.activeUrgency = urgency;
+        this.pauseRecognitionForTx();
+        await this.playUtteranceNow(text, urgency, targetGen);
+      } finally {
+        this.pendingNormalizedTexts.delete(norm);
+        this.pendingSpeechCount = Math.max(0, this.pendingSpeechCount - 1);
+        if (targetGen === this.speechGeneration && this.pendingSpeechCount === 0) {
+          this.isTxActive = false;
+          this.activeUrgency = "nominal";
+          this.micCooldownUntilMs = Date.now() + 850;
+          this.scheduleRecognitionResumeAfterTx(850);
+        }
+      }
     };
 
     this.speechQueueTail = this.speechQueueTail.then(job, job);
@@ -197,7 +289,11 @@ export class VoiceService {
   ): Promise<void> {
     if (myGen !== this.speechGeneration || !this.enabled || !text.trim()) return;
 
-    this.lastSpokenNormalized = normalizeForEcho(text);
+    const norm = normalizeForEcho(text);
+    this.recentSpokenNormalized.push(norm);
+    if (this.recentSpokenNormalized.length > 5) {
+      this.recentSpokenNormalized.shift();
+    }
     this.fx.playCommsClick(true);
 
     try {
@@ -218,7 +314,13 @@ export class VoiceService {
       this.setSpeaking(true);
 
       await new Promise<void>((resolve) => {
+        let settled = false;
         const done = () => {
+          if (settled) return;
+          settled = true;
+          if (this.settleCurrentPlayback === done) {
+            this.settleCurrentPlayback = null;
+          }
           audio.onended = null;
           audio.onerror = null;
           if (myGen === this.speechGeneration) {
@@ -227,6 +329,7 @@ export class VoiceService {
           }
           resolve();
         };
+        this.settleCurrentPlayback = done;
         audio.onended = done;
         audio.onerror = done;
         audio.play().catch(done);
@@ -253,13 +356,20 @@ export class VoiceService {
       if (preferred) utter.voice = preferred;
       this.setSpeaking(true);
       await new Promise<void>((resolve) => {
+        let settled = false;
         const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (this.settleCurrentPlayback === finish) {
+            this.settleCurrentPlayback = null;
+          }
           if (myGen === this.speechGeneration) {
             this.setSpeaking(false);
             this.fx.playCommsClick(false);
           }
           resolve();
         };
+        this.settleCurrentPlayback = finish;
         utter.onend = finish;
         utter.onerror = finish;
         window.speechSynthesis.speak(utter);
@@ -268,30 +378,25 @@ export class VoiceService {
   }
 
   /**
-   * Filters likely speaker->mic acoustic feedback shortly after/during AI speech
-   * while still allowing genuine human barge-in phrases cleanly.
+   * Secondary echo shield against acoustic feedback in open-mic mode.
    */
   private isLikelySelfEcho(transcript: string): boolean {
     const clean = normalizeForEcho(transcript);
     if (!clean) return true;
-
-    // Short clear commands are always treated as genuine operator intent
-    if (/^(confirm|check|done|acknowledged|roger|copy|stop|quiet|status|mic off)/.test(clean)) {
-      return false;
+    if (this.isTxActive || this.isSpeaking || Date.now() < this.micCooldownUntilMs) {
+      return true;
     }
 
-    const recentlySpoke = this.isSpeaking || Date.now() - this.lastSpokeEndedAtMs < 1400;
-    if (!recentlySpoke || !this.lastSpokenNormalized) return false;
+    const recentlySpoke = Date.now() - this.lastSpokeEndedAtMs < 1800;
+    if (!recentlySpoke || this.recentSpokenNormalized.length === 0) return false;
 
-    const spokenWords = new Set(this.lastSpokenNormalized.split(" "));
+    const spokenWords = new Set(this.recentSpokenNormalized.join(" ").split(" "));
     const heardWords = clean.split(" ");
-    if (heardWords.length <= 2 && spokenWords.has(heardWords[0])) return true;
-
     let overlap = 0;
     for (const w of heardWords) {
       if (w.length > 2 && spokenWords.has(w)) overlap += 1;
     }
-    return overlap / Math.max(1, heardWords.length) >= 0.6;
+    return overlap / Math.max(1, heardWords.length) >= 0.45;
   }
 
   /**
@@ -308,26 +413,34 @@ export class VoiceService {
     if (!Ctor) return false;
 
     this.micCallbacks = callbacks;
+    this.activeRecCtor = Ctor;
     this.keepListening = true;
     void this.fx.startMicMeter();
-    this.spawnRecognitionInstance(Ctor);
+    this.micCallbacks?.onStateChange(true);
+    if (!this.isTxActive && this.pendingSpeechCount === 0) {
+      this.spawnRecognitionInstance(Ctor);
+    }
     return true;
   }
 
   private spawnRecognitionInstance(Ctor: new () => SpeechRecognitionLike): void {
-    if (!this.keepListening) return;
+    if (!this.keepListening || this.isTxActive || this.pendingSpeechCount > 0) return;
     if (this.restartTimer) {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
     if (this.activeRecognition) {
+      const oldRec = this.activeRecognition;
+      this.activeRecognition = null;
+      oldRec.onresult = null;
+      oldRec.onerror = null;
+      oldRec.onend = null;
       try {
-        this.activeRecognition.abort?.();
-        this.activeRecognition.stop();
+        oldRec.abort?.();
+        oldRec.stop();
       } catch {
         // ignore
       }
-      this.activeRecognition = null;
     }
 
     const rec = new Ctor();
@@ -339,7 +452,15 @@ export class VoiceService {
     let lastFinalIdx = -1;
 
     rec.onresult = (ev) => {
-      if (!this.keepListening) return;
+      // Strictly ignore speaker playback / cooldown windows so AI NEVER hears or interrupts itself
+      if (
+        !this.keepListening ||
+        this.isTxActive ||
+        this.isSpeaking ||
+        Date.now() < this.micCooldownUntilMs
+      ) {
+        return;
+      }
       let interimBuf = "";
 
       for (let i = ev.resultIndex ?? 0; i < ev.results.length; i++) {
@@ -351,10 +472,7 @@ export class VoiceService {
           if (i <= lastFinalIdx) continue;
           lastFinalIdx = i;
           if (!this.isLikelySelfEcho(text)) {
-            if (this.isSpeaking) {
-              this.stopSpeech();
-              this.micCallbacks?.onBargeIn();
-            }
+            this.micCallbacks?.onBargeIn();
             this.micCallbacks?.onFinal(text);
           }
         } else {
@@ -363,10 +481,6 @@ export class VoiceService {
       }
 
       if (interimBuf && !this.isLikelySelfEcho(interimBuf)) {
-        if (this.isSpeaking && interimBuf.split(/\s+/).length >= 2) {
-          this.stopSpeech();
-          this.micCallbacks?.onBargeIn();
-        }
         this.micCallbacks?.onInterim(interimBuf);
       }
     };
@@ -383,12 +497,15 @@ export class VoiceService {
       if (this.activeRecognition === rec) {
         this.activeRecognition = null;
       }
-      if (this.keepListening && this.micCallbacks) {
+      if (!this.keepListening || !this.micCallbacks) {
+        this.micCallbacks?.onStateChange(false);
+        return;
+      }
+      // During AI transmission, resume is handled after TX cooldown instead of spawning mid-speech
+      if (!this.isTxActive && this.pendingSpeechCount === 0) {
         this.restartTimer = setTimeout(() => {
           this.spawnRecognitionInstance(Ctor);
-        }, 220);
-      } else {
-        this.micCallbacks?.onStateChange(false);
+        }, 250);
       }
     };
 
@@ -396,7 +513,7 @@ export class VoiceService {
       rec.start();
       this.micCallbacks?.onStateChange(true);
     } catch {
-      if (this.keepListening) {
+      if (this.keepListening && !this.isTxActive) {
         this.restartTimer = setTimeout(() => {
           this.spawnRecognitionInstance(Ctor);
         }, 450);
@@ -406,17 +523,22 @@ export class VoiceService {
 
   public stopListening(): void {
     this.keepListening = false;
+    this.activeRecCtor = null;
     if (this.restartTimer) {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
     if (this.activeRecognition) {
+      const rec = this.activeRecognition;
+      this.activeRecognition = null;
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
       try {
-        this.activeRecognition.stop();
+        rec.stop();
       } catch {
         // ignore
       }
-      this.activeRecognition = null;
     }
     this.fx.stopMicMeter();
     this.micCallbacks?.onStateChange(false);

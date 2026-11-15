@@ -483,4 +483,46 @@ describe("ARASAKA Engine & Simulation Verification (V-01 .. V-10)", () => {
     sim.jumpForward(5 * 60);
     expect(eng.getLiveState().activeAlerts).toHaveLength(0);
   });
+
+  it("V-15: Assistant never self-interrupts or re-spams alerts across concurrent triggers & cascade clear", () => {
+    const eng = new CrewHealthEngine();
+    const sim = new MissionSimulator(eng);
+    eng.onStepMitigation = (p, s) => sim.applyMitigationForStep(p, s, false);
+    const bridge = new AssistantEngineBridge(eng);
+    const client = new AzureProxyClient("http://127.0.0.1:0");
+    const voice = new VoiceService(client);
+    voice.enabled = true;
+    const spokenCalls: Array<{ text: string; interrupt: boolean }> = [];
+    voice.speak = async (text: string, _urgency, interrupt = false) => {
+      spokenCalls.push({ text, interrupt });
+    };
+    const controller = new AssistantController(bridge, client, voice);
+    sim.enterEvaSurface();
+
+    eng.subscribe((next) => controller.onAlertsUpdated(next.activeAlerts));
+
+    // Nominal ticks produce zero speech calls
+    sim.advanceTo(eng.getTime() + 60, 15);
+    expect(spokenCalls).toHaveLength(0);
+
+    // Fire S-01 (shelter), advance multiple ticks -> 1 alert announcement, interrupt = false
+    sim.firePreset("S-01", "forward");
+    sim.advanceTo(eng.getTime() + 2 * 60, 15);
+    const afterS01Count = spokenCalls.length;
+    expect(afterS01Count).toBe(1);
+    expect(spokenCalls.every((c) => c.interrupt === false)).toBe(true);
+
+    // Fire S-14 concurrently -> cascade_coupled announces once with interrupt = false
+    sim.firePreset("S-14", "forward");
+    sim.advanceTo(eng.getTime() + 10 * 60, 30);
+    expect(spokenCalls.length).toBeLessThanOrEqual(3);
+    expect(spokenCalls.every((c) => c.interrupt === false)).toBe(true);
+
+    // Confirming shelter steps resolves S-01 & cascade_coupled WITHOUT re-announcing env_pressure_bounds
+    const callsBeforeStep = spokenCalls.length;
+    controller.confirmCurrentProtocolStep(); // shelter/air_check step 0
+    // Only the step confirmation message should speak (1 call, interrupt = false)
+    expect(spokenCalls.length - callsBeforeStep).toBe(1);
+    expect(spokenCalls[spokenCalls.length - 1].interrupt).toBe(false);
+  });
 });
