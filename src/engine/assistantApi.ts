@@ -149,4 +149,23 @@ export class AssistantEngineBridge {
   public acknowledge(alertId: string): AlertObject | null {
     return this.engine.acknowledgeAlert(alertId);
   }
+
+  public log_escalation(
+    protocolId: ProtocolId | "none",
+    stage: number,
+    summary: string
+  ): EventLogEntry {
+    return this.engine.ingestEvent(
+      this.engine.getTime(),
+      "unresponsive_crew_escalation",
+      {
+        protocolId,
+        stage,
+        summary,
+        earthDelayMin: ENGINE_LIMITS.earthReplyDelayMin.value,
+      },
+      undefined,
+      true
+    );
+  }
 }

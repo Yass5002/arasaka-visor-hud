@@ -150,7 +150,31 @@ describe("ARASAKA Engine & Simulation Verification (V-01 .. V-10)", () => {
       }
     );
 
-    expect(PRESET_CATALOGUE.length).toBe(14);
+    // S-14 EVA Suit Pressure Seal Leak -> env_pressure_bounds Class 1/2 + air_check
+    verifyPreset(
+      (sim) => {
+        sim.firePreset("S-14", "forward");
+        sim.jumpForward(15 * 60);
+      },
+      (live) => {
+        const leak = live.activeAlerts.find((a) => a.detectorId === "env_pressure_bounds");
+        expect(leak).toBeDefined();
+        expect(leak?.class).toBe(1);
+        expect(leak?.protocolId).toBe("air_check");
+      }
+    );
+
+    // S-15 EVA Nominal Traverse -> 0 alerts (138 bpm within 149 bpm EVA threshold)
+    verifyPreset(
+      (sim) => {
+        sim.firePreset("S-15", "forward");
+      },
+      (live) => {
+        expect(live.activeAlerts.some((a) => a.detectorId === "cv_context_hr")).toBe(false);
+      }
+    );
+
+    expect(PRESET_CATALOGUE.length).toBe(16);
   }, 15000);
 
   it("V-02: Engine rules are source-independent across simulator, manual, and sensor feeds", () => {
@@ -374,5 +398,35 @@ describe("ARASAKA Engine & Simulation Verification (V-01 .. V-10)", () => {
     expect(live.indicators.immune_index.visorVisible).toBe(false);
     expect(live.indicators.cognitive_drift.visorVisible).toBe(false);
     expect(live.indicators.sans_risk.visorVisible).toBe(false);
+  });
+
+  it("V-13: Class 1 protocol preemption stack, EVA mitigation recovery, and unresponsive escalation log", () => {
+    const eng = new CrewHealthEngine();
+    const sim = new MissionSimulator(eng);
+    const bridge = new AssistantEngineBridge(eng);
+    sim.enterEvaSurface();
+
+    // Start exertion recovery (Class 3), then preempt with Class 1 Suit Pressure Leak (air_check)
+    bridge.start_protocol("exertion_recovery");
+    expect(eng.getLiveState().activeProtocol?.id).toBe("exertion_recovery");
+
+    sim.firePreset("S-14", "forward");
+    sim.jumpForward(15 * 60);
+    const preempted = bridge.start_protocol("air_check");
+    expect(preempted.id).toBe("air_check");
+    expect(eng.getLiveState().pausedProtocols.some((p) => p.id === "exertion_recovery")).toBe(true);
+
+    // Completing air_check steps + EVA mitigation stabilizes suit pressure & resumes queued exertion_recovery
+    const total = eng.getLiveState().activeProtocol!.totalSteps;
+    for (let s = 0; s < total; s++) {
+      bridge.complete_step("air_check", s);
+      sim.applyMitigationForStep("air_check", s);
+    }
+    expect(eng.getLiveState().indicators.suit_pressure.value).toBeGreaterThan(35);
+    expect(eng.getLiveState().activeProtocol?.id).toBe("exertion_recovery");
+
+    // Unresponsive escalation records append-only log event cleanly
+    bridge.log_escalation("shelter", 3, "Crew unresponsive >45s during SPE");
+    expect(bridge.get_events("unresponsive_crew_escalation").length).toBe(1);
   });
 });

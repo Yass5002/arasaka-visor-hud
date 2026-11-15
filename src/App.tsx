@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AssistantController,
   type AssistantCaptionState,
+  type CrewCallsign,
 } from "./assistant/assistantController";
 import { AzureProxyClient } from "./assistant/azureClient";
 import { VoiceService, type AzureVoiceId } from "./assistant/voiceService";
 import { AssistantBar, type ChatHistoryItem } from "./components/AssistantBar";
+import { PreLaunchBriefing } from "./components/PreLaunchBriefing";
 import { SettingsModal } from "./components/SettingsModal";
 import { SimulationPanel } from "./components/SimulationPanel";
 import { SourcesPanel } from "./components/SourcesPanel";
@@ -14,6 +16,7 @@ import { VisorScene } from "./components/VisorScene";
 import { AssistantEngineBridge } from "./engine/assistantApi";
 import { CrewHealthEngine } from "./engine/engine";
 import type { LiveState } from "./engine/types";
+import { runMissionAssetPreload, type PreloadSnapshot } from "./services/assetPreloader";
 import { MissionSimulator, type ClockSpeed } from "./sim/simulator";
 
 function formatClock(day: number, todSec: number): string {
@@ -39,35 +42,40 @@ export function App() {
     const client = new AzureProxyClient();
     const voice = new VoiceService(client);
     const assistant = new AssistantController(bridge, client, voice);
+    assistant.onStepMitigation = (protoId, stepIdx) => {
+      simulator.applyMitigationForStep(protoId, stepIdx);
+    };
     refs.current = { engine, simulator, bridge, client, voice, assistant };
   }
 
   const { engine, simulator, assistant, client, voice } = refs.current;
 
-  const [liveState, setLiveState] = useState<LiveState>(() => engine.getLiveState());
-  const [captionState, setCaptionState] = useState<AssistantCaptionState>({
-    speaker: "ASSISTANT",
-    text: "All crew health systems nominal. Simulator ready on Sol 1.",
-    timestampT: 0,
-    alertClass: 0,
-    isBusy: false,
-    isListening: false,
-    isSpeaking: false,
-    voiceConnected: false,
-    cloudStatus: "checking",
+  const [phase, setPhase] = useState<"briefing" | "live">("briefing");
+  const [preload, setPreload] = useState<PreloadSnapshot>({
+    progressPct: 0,
+    ready: false,
+    items: [],
+    cloudHealth: null,
   });
+  const [callsign, setCallsign] = useState<CrewCallsign>("Sir");
+  const [openMicOnLaunch, setOpenMicOnLaunch] = useState(true);
+
+  const [liveState, setLiveState] = useState<LiveState>(() => engine.getLiveState());
+  const [captionState, setCaptionState] = useState<AssistantCaptionState>(() => assistant.caption);
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([
     {
       id: "welcome-0",
       speaker: "ASSISTANT",
-      text: "Crew Health Assistant ready. Voice audio is muted until you click Audio On or Mic; ask about radiation, air, cardiovascular, or long-duration health anytime.",
+      text: "EVA visor telemetry initialized, Sir. All life-support systems nominal.",
       missionClock: "Sol 1 08:00",
     },
   ]);
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<ClockSpeed>(1);
-  const [selectedVoice, setSelectedVoice] = useState<AzureVoiceId>(voice.selectedVoice);
+  const [selectedVoice, setSelectedVoice] = useState<AzureVoiceId>(voice.selectedVoiceId);
+  const [radioFilterEnabled, setRadioFilterEnabled] = useState<boolean>(voice.fx.radioFilterEnabled);
+  const [sfxEnabled, setSfxEnabled] = useState<boolean>(voice.fx.sfxEnabled);
   const [terrainId, setTerrainId] = useState<"mars" | "moon" | "orbit">("mars");
 
   const [simulationOpen, setSimulationOpen] = useState(false);
@@ -79,18 +87,34 @@ export function App() {
   const captionRef = useRef<AssistantCaptionState | null>(captionState);
   const lastLoggedMsgRef = useRef<string>("");
 
+  // Step 1 on boot: preload all 3D visual assets, fonts & cloud checks BEFORE showing scene or sim
   useEffect(() => {
-    simulator.playing = playing;
+    let cancelled = false;
+    void runMissionAssetPreload(client, (snap) => {
+      if (!cancelled) {
+        setPreload(snap);
+        if (snap.cloudHealth) {
+          void assistant.probeCloud();
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, assistant]);
+
+  useEffect(() => {
+    simulator.playing = playing && phase === "live";
     simulator.speed = speed;
-  }, [simulator, playing, speed]);
+  }, [simulator, playing, speed, phase]);
 
   useEffect(() => {
-    void assistant.probeCloud();
-
     const unsubEngine = engine.subscribe((next) => {
       liveStateRef.current = next;
       setLiveState(next);
-      assistant.onAlertsUpdated(next.activeAlerts);
+      if (phase === "live") {
+        assistant.onAlertsUpdated(next.activeAlerts);
+      }
     });
 
     const unsubCaption = assistant.subscribe((cap) => {
@@ -116,9 +140,10 @@ export function App() {
       unsubEngine();
       unsubCaption();
     };
-  }, [engine, assistant]);
+  }, [engine, assistant, phase]);
 
   useEffect(() => {
+    if (phase !== "live") return;
     let lastTs = performance.now();
     const timer = window.setInterval(() => {
       const now = performance.now();
@@ -129,7 +154,47 @@ export function App() {
       }
     }, 250);
     return () => window.clearInterval(timer);
-  }, [simulator]);
+  }, [simulator, phase]);
+
+  useEffect(() => {
+    return () => {
+      assistant.dispose();
+    };
+  }, [assistant]);
+
+  const handleLaunchEva = useCallback(() => {
+    if (!preload.ready) return;
+    assistant.setCallsign(callsign);
+    simulator.enterEvaSurface();
+    voice.unlockAudio();
+    assistant.setVoiceConnected(true);
+    setPhase("live");
+    assistant.announceSuitEntry(openMicOnLaunch);
+  }, [preload.ready, assistant, callsign, simulator, voice, openMicOnLaunch]);
+
+  const sampleAudioLevels = useCallback(() => {
+    return {
+      speech: voice.fx.sampleSpeechLevel(),
+      mic: voice.fx.sampleMicLevel(),
+    };
+  }, [voice]);
+
+  // Do NOT mount the 3D scene, HUD, or telemetry dock until all assets are loaded and user launches EVA
+  if (phase === "briefing") {
+    return (
+      <PreLaunchBriefing
+        preload={preload}
+        callsign={callsign}
+        openMicOnLaunch={openMicOnLaunch}
+        onChangeCallsign={(cs) => {
+          setCallsign(cs);
+          assistant.setCallsign(cs);
+        }}
+        onChangeOpenMicOnLaunch={setOpenMicOnLaunch}
+        onLaunch={handleLaunchEva}
+      />
+    );
+  }
 
   return (
     <div className="screen-shell">
@@ -139,6 +204,7 @@ export function App() {
           <VisorScene
             liveStateRef={liveStateRef}
             captionRef={captionRef}
+            sampleAudioLevels={sampleAudioLevels}
             terrainId={terrainId}
           />
         </div>
@@ -152,7 +218,7 @@ export function App() {
         onAsk={(q) => void assistant.ask(q)}
         onToggleListening={() => assistant.toggleListening()}
         onToggleVoice={() => assistant.setVoiceConnected(!captionState.voiceConnected)}
-        onStopSpeaking={() => voice.stopSpeaking()}
+        onStopSpeaking={() => voice.stopSpeech()}
         onConfirmStep={() => assistant.confirmCurrentProtocolStep()}
         onAcknowledgeAlert={(id) => engine.acknowledgeAlert(id)}
         onOpenSimulation={() => setSimulationOpen(true)}
@@ -161,7 +227,7 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      {/* Dedicated Mission Events & Simulation Studio */}
+      {/* Dedicated EVA Surface Events & Simulation Studio */}
       <SimulationPanel
         open={simulationOpen}
         onClose={() => setSimulationOpen(false)}
@@ -183,26 +249,41 @@ export function App() {
         onToggleVoice={(enabled) => assistant.setVoiceConnected(enabled)}
         selectedVoice={selectedVoice}
         onSelectVoice={(v) => {
-          voice.selectedVoice = v;
+          voice.setVoiceById(v);
           setSelectedVoice(v);
         }}
         onTestVoice={() => {
           voice.unlockAudio();
           assistant.setVoiceConnected(true);
           void voice.speak(
-            "Arasaka Crew Health Assistant voice check nominal. Azure Neural Speech is active.",
-            true
+            `Arasaka Crew Health Assistant comms check nominal, ${callsign}. Suit radio audio active.`,
+            "nominal"
           );
+        }}
+        radioFilterEnabled={radioFilterEnabled}
+        onToggleRadioFilter={(enabled) => {
+          voice.fx.setRadioFilterEnabled(enabled);
+          setRadioFilterEnabled(enabled);
+        }}
+        sfxEnabled={sfxEnabled}
+        onToggleSfx={(enabled) => {
+          voice.fx.sfxEnabled = enabled;
+          setSfxEnabled(enabled);
+        }}
+        callsign={callsign}
+        onChangeCallsign={(cs) => {
+          setCallsign(cs);
+          assistant.setCallsign(cs);
         }}
         cloudStatus={captionState.cloudStatus}
         onProbeCloud={() => void assistant.probeCloud()}
         proxyBaseUrl={client.getBaseUrl()}
-        sttSupported={voice.isSttSupported()}
+        sttSupported={voice.supportsSpeechRecognition}
         terrainId={terrainId}
         onSelectTerrain={(id) => setTerrainId(id)}
       />
 
-      {/* Habitat / Wrist Slow Health Trends & Append-Only Event Log Modal */}
+      {/* Slow Health Trends & Append-Only Event Log Modal */}
       <TrendsModal
         open={trendsOpen}
         onClose={() => setTrendsOpen(false)}
@@ -210,11 +291,8 @@ export function App() {
         liveState={liveState}
       />
 
-      {/* Standards, Scientific Sources & Basis Legend Modal */}
-      <SourcesPanel
-        open={sourcesOpen}
-        onClose={() => setSourcesOpen(false)}
-      />
+      {/* Authoritative Sources & Evidence Matrix */}
+      <SourcesPanel open={sourcesOpen} onClose={() => setSourcesOpen(false)} />
     </div>
   );
 }

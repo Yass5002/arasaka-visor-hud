@@ -1,12 +1,14 @@
 import type { ActivityType, IndicatorId, LocationType } from "../engine/types";
 
 export type PresetGroup = "fast_event" | "slow_drift" | "smart_case" | "custom";
+export type PresetScope = "eva_surface" | "mission_long";
 
 export interface PresetDefinition {
   id: string;
   code: string;
   name: string;
   group: PresetGroup;
+  scope?: PresetScope;
   summary: string;
   basis: string;
   recommendedSpeed?: 1 | 60 | 3600 | 86400;
@@ -20,13 +22,14 @@ export interface PresetDefinition {
 }
 
 export const PRESET_CATALOGUE: PresetDefinition[] = [
-  // 7.1 Fast events
+  // 7.1 Fast events (Outside-Cabin Mars Surface EVA testable scenarios tagged scope: "eva_surface")
   {
     id: "S-01",
     code: "S-01",
     name: "Solar Particle Event",
     group: "fast_event",
-    summary: "Dose rate steps to 5× baseline within 5 min (integrating to ~40 mSv over 6 h); HR +25 bpm, stress +20.",
+    scope: "eva_surface",
+    summary: "Surface radiation climbs 5× baseline within 5 min (~40 mSv over 6 h); HR +25 bpm, stress +20.",
     basis: "[V1 4031], [V1 4030], [V2 6164], R2",
     recommendedSpeed: 60,
     targetContext: { activity: "eva", location: "surface" },
@@ -34,19 +37,21 @@ export const PRESET_CATALOGUE: PresetDefinition[] = [
   {
     id: "S-02",
     code: "S-02",
-    name: "CO₂ Buildup",
+    name: "Suit CO₂ Scrubber Saturation",
     group: "fast_event",
-    summary: "ppCO₂ rises +0.05 mmHg/min from 1.5 mmHg; 1-hr mean hits 2.4 mmHg (~47 min, Class 3) and 3.0 mmHg (60 min, Class 2).",
+    scope: "eva_surface",
+    summary: "Helmet loop ppCO₂ rises +0.05 mmHg/min; 1-hr mean hits 2.4 mmHg (Class 3) and 3.0 mmHg (Class 2).",
     basis: "[V2 6004], R4",
     recommendedSpeed: 60,
-    targetContext: { activity: "cabin", location: "habitat" },
+    targetContext: { activity: "eva", location: "surface" },
   },
   {
     id: "S-03",
     code: "S-03",
-    name: "Oxygen Drop (PIO₂)",
+    name: "Suit Oxygen Drop (PIO₂)",
     group: "fast_event",
-    summary: "PIO₂ falls from 150 to 120 mmHg over 10 min; HR +20 bpm (Class 3 < 145, Class 2 < 127 mmHg).",
+    scope: "eva_surface",
+    summary: "Primary suit PIO₂ falls from 150 to 120 mmHg over 10 min; HR +20 bpm (Class 3 < 145, Class 2 < 127).",
     basis: "[V2 6003], R16",
     recommendedSpeed: 60,
     targetContext: { activity: "eva", location: "surface" },
@@ -56,9 +61,21 @@ export const PRESET_CATALOGUE: PresetDefinition[] = [
     code: "S-04",
     name: "EVA Exertion Strain",
     group: "fast_event",
-    summary: "HR climbs above 149 bpm EVA limit, HRV drops 40% under baseline, O₂ consumption high.",
+    scope: "eva_surface",
+    summary: "Traverse HR climbs to 158 bpm (> 149 bpm EVA limit), HRV drops 40%, O₂ consumption elevated.",
     basis: "Demo",
     recommendedSpeed: 1,
+    targetContext: { activity: "eva", location: "surface" },
+  },
+  {
+    id: "S-14",
+    code: "EVA-P1",
+    name: "Suit Pressure Seal Leak",
+    group: "fast_event",
+    scope: "eva_surface",
+    summary: "PLSS suit pressure drops from 43.0 kPa below 29.6 kPa EVA floor; Class 1 emergency at < 25.6 kPa.",
+    basis: "[V2 6002] Suit Pressure Bounds",
+    recommendedSpeed: 60,
     targetContext: { activity: "eva", location: "surface" },
   },
   {
@@ -66,7 +83,8 @@ export const PRESET_CATALOGUE: PresetDefinition[] = [
     code: "S-05",
     name: "Orthostatic Dizziness",
     group: "fast_event",
-    summary: "Standing systolic blood pressure falls >= 20 mmHg with compensatory HR jump.",
+    scope: "mission_long",
+    summary: "Post-mission standing systolic blood pressure falls >= 20 mmHg inside habitat.",
     basis: "Demo",
     recommendedSpeed: 1,
     targetContext: { activity: "cabin", location: "habitat" },
@@ -133,28 +151,33 @@ export const PRESET_CATALOGUE: PresetDefinition[] = [
     code: "S-11",
     name: "Career Dose Limit Drift",
     group: "slow_drift",
-    summary: "Cumulative dose climbs from prior career baseline toward 600 mSv (Class 3 at 75%, Class 2 at 90%).",
+    scope: "eva_surface",
+    summary: "Cumulative EVA radiation climbs from prior baseline toward 600 mSv limit (Class 3 at 75%, Class 2 at 90%).",
     basis: "[V1 4030]",
     recommendedSpeed: 86400,
     supportsScenarioStart: true,
     scenarioStartDays: 60,
+    targetContext: { activity: "eva", location: "surface" },
   },
 
   // 7.3 Smart cases
   {
     id: "S-12",
     code: "S-12",
-    name: "Cascade (Coupled Hazards)",
+    name: "Multi-Hazard EVA Cascade",
     group: "smart_case",
-    summary: "Sleep debt + solar dose rate rise + isolation stress active together; ranked single explanation.",
+    scope: "eva_surface",
+    summary: "Fatigue strain + solar dose surge + acute stress coupled on surface EVA; ranked single explanation.",
     basis: "ENG-DET-005, ENG-DET-007, R3",
     recommendedSpeed: 60,
+    targetContext: { activity: "eva", location: "surface" },
   },
   {
     id: "S-13",
     code: "S-13",
     name: "False Alarm (Exercise Context)",
     group: "smart_case",
+    scope: "mission_long",
     summary: "HR 140 bpm during scheduled resistive exercise: zero alerts, silent assistant (ENG-CTX-003).",
     basis: "ENG-CTX-003",
     recommendedSpeed: 1,
@@ -165,9 +188,21 @@ export const PRESET_CATALOGUE: PresetDefinition[] = [
     code: "S-13b",
     name: "Negative Control (Cabin Context)",
     group: "smart_case",
+    scope: "mission_long",
     summary: "Same 140 bpm HR with context set to cabin: alert raises immediately (ENG-CTX-002).",
     basis: "ENG-CTX-002",
     recommendedSpeed: 1,
     targetContext: { activity: "cabin", location: "habitat" },
+  },
+  {
+    id: "S-15",
+    code: "EVA-CTX",
+    name: "Nominal Surface Traverse (Context Guard)",
+    group: "smart_case",
+    scope: "eva_surface",
+    summary: "HR 138 bpm during active EVA climb stays silent below 149 bpm threshold (context-aware alarm gate).",
+    basis: "ENG-CTX-001",
+    recommendedSpeed: 1,
+    targetContext: { activity: "eva", location: "surface" },
   },
 ];

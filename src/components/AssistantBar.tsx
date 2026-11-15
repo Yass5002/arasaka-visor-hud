@@ -107,11 +107,33 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
 
         <div className="grid-2 mono" style={{ fontSize: 11.5, color: "#dbeafe" }}>
           <div>Dose Rate: {liveState.indicators.dose_rate.value.toFixed(2)} mSv/d</div>
-          <div>Career: {liveState.careerDosePercent.toFixed(1)}% / 600</div>
+          <div>
+            {liveState.context.activity === "eva"
+              ? `Suit Press: ${liveState.indicators.suit_pressure.value.toFixed(1)} kPa`
+              : `Career: ${liveState.careerDosePercent.toFixed(1)}% / 600`}
+          </div>
           <div>ppCO₂: {liveState.indicators.ppco2.value.toFixed(2)} mmHg</div>
           <div>PIO₂: {Math.round(liveState.indicators.pio2.value)} mmHg</div>
         </div>
       </div>
+
+      {/* Unresponsive Crew NASA Escalation Beacon */}
+      {captionState.unresponsiveEscalated && (
+        <div
+          className="hds-card"
+          style={{
+            borderColor: "#ff4828",
+            background: "rgba(221, 54, 28, 0.28)",
+          }}
+        >
+          <div className="hds-card-title">
+            <span className="badge-class-1">CREW UNRESPONSIVE · HAILING HABITAT</span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#ffe4e0" }}>
+            No response detected &gt;45 s. Autonomous telemetry packet queued for Flight Surgeon (~12 min delay).
+          </div>
+        </div>
+      )}
 
       {/* Active Ranked Alert & Protocol Stepper */}
       {primary && (
@@ -127,15 +149,22 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
             <span className={`badge-class-${primary.class}`}>
               CLASS {primary.class} · {primary.title}
             </span>
-            {primary.state === "active" && (
-              <button
-                type="button"
-                className="chip-btn"
-                onClick={() => onAcknowledgeAlert(primary.id)}
-              >
-                Ack
-              </button>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {(liveState.pausedProtocols?.length ?? 0) > 0 && (
+                <span className="mono" style={{ fontSize: 10.5, color: "#ffb84d" }}>
+                  +{liveState.pausedProtocols.length} QUEUED
+                </span>
+              )}
+              {primary.state === "active" && (
+                <button
+                  type="button"
+                  className="chip-btn"
+                  onClick={() => onAcknowledgeAlert(primary.id)}
+                >
+                  Ack
+                </button>
+              )}
+            </div>
           </div>
           <div style={{ fontSize: 12, color: "#f8fafc", marginBottom: 6 }}>{primary.whyLine}</div>
           {primary.escalateToMedical && (
@@ -193,9 +222,9 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
               type="button"
               className={`chip-btn ${captionState.isListening ? "active" : ""}`}
               onClick={onToggleListening}
-              title="Voice speech recognition (automatically enables voice reply)"
+              title="Toggle continuous open duplex microphone (say 'mic off' anytime)"
             >
-              {captionState.isListening ? "Listening…" : "Mic"}
+              {captionState.isListening ? "Mic Live" : "Open Mic"}
             </button>
           </div>
         </div>
@@ -204,27 +233,33 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
           <button
             type="button"
             className="chip-btn"
-            onClick={() => submitQuestion("How is my health?")}
+            onClick={() => submitQuestion("Check my suit pressure and air")}
           >
-            How is my health?
+            Suit &amp; Air
           </button>
           <button
             type="button"
             className="chip-btn"
             onClick={() => submitQuestion("What is my radiation dose?")}
           >
-            Dose check
+            Dose Check
           </button>
           <button
             type="button"
             className="chip-btn"
-            onClick={() => submitQuestion("Bone density and sleep summary?")}
+            onClick={() => submitQuestion("Status report")}
           >
-            Bone &amp; sleep
+            Status Report
           </button>
         </div>
 
         <div className="assistant-log">
+          {captionState.interimTranscript && (
+            <div className="chat-bubble crew" style={{ opacity: 0.78, borderStyle: "dashed" }}>
+              <div className="chat-bubble-meta">CREW (LIVE MIC)</div>
+              <div>{captionState.interimTranscript}…</div>
+            </div>
+          )}
           {history.map((item) => (
             <div
               key={item.id}

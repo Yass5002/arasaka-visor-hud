@@ -225,6 +225,26 @@ export class CrewHealthEngine {
   // =========================================================================
 
   public startProtocol(protocolId: ProtocolId): ActiveProtocolState {
+    const current = this.store.activeProtocol;
+    if (current && current.id === protocolId && !current.completed) {
+      return current;
+    }
+
+    if (current && !current.completed && current.id !== protocolId) {
+      this.store.pausedProtocols = [
+        { ...current, completedSteps: [...current.completedSteps] },
+        ...this.store.pausedProtocols.filter((p) => p.id !== current.id),
+      ];
+    }
+
+    const pausedIdx = this.store.pausedProtocols.findIndex((p) => p.id === protocolId);
+    if (pausedIdx !== -1) {
+      const resumed = this.store.pausedProtocols.splice(pausedIdx, 1)[0];
+      this.store.activeProtocol = resumed;
+      this.notify();
+      return resumed;
+    }
+
     const def = PROTOCOLS[protocolId];
     const state: ActiveProtocolState = {
       id: protocolId,
@@ -270,6 +290,12 @@ export class CrewHealthEngine {
         }
       }
       this.store.activeAlerts = this.store.activeAlerts.filter((a) => a.state !== "resolved");
+
+      // Automatically resume next paused protocol on the preemption stack if one exists
+      const nextQueued = this.store.pausedProtocols.shift();
+      if (nextQueued) {
+        this.store.activeProtocol = nextQueued;
+      }
     } else {
       active.currentStepIndex = nextIdx;
       active.currentStep = def.steps[nextIdx];
@@ -385,6 +411,10 @@ export class CrewHealthEngine {
         ? { ...this.store.activeAlerts[0] }
         : null,
       activeProtocol: this.store.activeProtocol ? { ...this.store.activeProtocol } : null,
+      pausedProtocols: this.store.pausedProtocols.map((p) => ({
+        ...p,
+        completedSteps: [...p.completedSteps],
+      })),
       careerDosePercent: Number(
         ((this.store.cumulativeDoseMsv / ENGINE_LIMITS.careerDoseLimitMsv.value) * 100).toFixed(2)
       ),

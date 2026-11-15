@@ -81,6 +81,7 @@ export type EventLogType =
   | "assistant_said"
   | "astronaut_asked"
   | "step_completed"
+  | "unresponsive_crew_escalation"
   | "preset_fired"
   | "manual_override";
 
@@ -204,6 +205,7 @@ export interface LiveState {
   activeAlerts: AlertObject[];
   rankedPrimaryAlert: AlertObject | null;
   activeProtocol: ActiveProtocolState | null;
+  pausedProtocols: ActiveProtocolState[];
   /** Cumulative dose as % of 600 mSv NASA-STD-3001 career limit */
   careerDosePercent: number;
   /** Elapsed time in seconds since last SPE onset (0 if inactive) */
@@ -230,6 +232,7 @@ export interface EngineSnapshot {
   activeAlerts: AlertObject[];
   cooldownUntilByArea: Partial<Record<HealthArea, number>>;
   activeProtocol: ActiveProtocolState | null;
+  pausedProtocols: ActiveProtocolState[];
 }
 
 export type BoneSiteKey = "lumbar" | "femoral_neck" | "trochanter" | "pelvis" | "total";

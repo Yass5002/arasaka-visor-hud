@@ -6,6 +6,7 @@ import type {
   IndicatorId,
   IndicatorSample,
   LocationType,
+  ProtocolId,
 } from "../engine/types";
 import { PRESET_CATALOGUE, type PresetDefinition } from "./presets";
 
@@ -33,6 +34,7 @@ export class MissionSimulator {
   public speed: ClockSpeed = 1;
 
   private activePresets: ActivePresetInstance[] = [];
+  private mitigatedPresets = new Set<string>();
   private manualOverrides: Partial<Record<IndicatorId, number>> = {};
   private manualContextLock: { activity: ActivityType; location: LocationType } | null = null;
   private snapshots: EngineSnapshot[] = [];
@@ -271,6 +273,14 @@ export class MissionSimulator {
 
       switch (active.id) {
         case "S-01": {
+          if (this.mitigatedPresets.has("S-01")) {
+            // Crew inside storm shelter shielding: ambient radiation heavily attenuated
+            doseRate = Math.max(doseRate, 0.72);
+            hr += 6;
+            stress = Math.max(stress, 24);
+            solarFlag = 0;
+            break;
+          }
           // Rises immediately on onset (>1.2 mSv/d) and hits 5x baseline within 5 min (~40 mSv over 6h)
           const ramp5 = Math.min(1, dtMin / 5);
           const bell6h = dtMin <= 360 ? Math.sin(Math.min(1, dtMin / 360) * Math.PI) : 0.1;
@@ -281,6 +291,11 @@ export class MissionSimulator {
           break;
         }
         case "S-02": {
+          if (this.mitigatedPresets.has("S-02")) {
+            ppco2 = 1.65;
+            hr += 4;
+            break;
+          }
           // +0.05 mmHg/min from 1.5 mmHg baseline -> 1h avg 2.4 @ ~47m, 3.0 @ 60m
           ppco2 = 1.5 + 0.05 * Math.min(dtMin, 90);
           rt = Math.round(profile.reactionTimeBaselineMs * (1 + 0.15 * Math.min(1, dtMin / 45)));
@@ -288,15 +303,42 @@ export class MissionSimulator {
           break;
         }
         case "S-03": {
+          if (this.mitigatedPresets.has("S-03")) {
+            pio2 = 152;
+            hr += 4;
+            break;
+          }
           // PIO2 falls 150 -> 120 over 10 min
           pio2 = 150 - 30 * Math.min(1, dtMin / 10);
           hr += 20 * Math.min(1, dtMin / 10);
           break;
         }
         case "S-04": {
+          if (this.mitigatedPresets.has("S-04")) {
+            hr = 108;
+            o2Consumption = 1.1;
+            break;
+          }
           hr = 158;
           hrv = Math.round(profile.hrvBaselineMs * 0.6); // 40% under baseline
           o2Consumption = 2.15;
+          break;
+        }
+        case "S-14": {
+          if (this.mitigatedPresets.has("S-14")) {
+            suitPressure = 42.4;
+            hr += 6;
+            break;
+          }
+          // Suit pressure seal breach: drops from 43.0 kPa below 29.6 kPa floor over ~8 min
+          const frac = Math.min(1, dtMin / 8);
+          suitPressure = Number((43.0 - 18.5 * frac).toFixed(2));
+          if (isEva) {
+            const suitMmHg = suitPressure * 7.50062;
+            pio2 = Math.round((suitMmHg - 47) * 0.545);
+          }
+          hr += Math.round(28 * frac);
+          respRate += Math.round(10 * frac);
           break;
         }
         case "S-05": {
@@ -345,6 +387,12 @@ export class MissionSimulator {
         case "S-13":
         case "S-13b": {
           hr = 140;
+          break;
+        }
+        case "S-15": {
+          hr = 138;
+          respRate = 24;
+          o2Consumption = 1.32;
           break;
         }
       }
@@ -440,6 +488,7 @@ export class MissionSimulator {
     }
 
     // Avoid duplicate identical preset instance; replace startT to re-run cleanly
+    this.mitigatedPresets.delete(def.id);
     this.activePresets = this.activePresets.filter((p) => p.id !== def.id);
     const nowT = this.engine.getTime();
     this.activePresets.push({ id: def.id, startT: nowT, definition: def });
@@ -456,9 +505,38 @@ export class MissionSimulator {
 
   public clearPresets(): void {
     this.activePresets = [];
+    this.mitigatedPresets.clear();
     this.manualOverrides = {};
     this.manualContextLock = null;
     this.stepSimulation(this.engine.getTime());
+  }
+
+  /** Switches simulation context directly into outside-cabin Mars Surface EVA mode */
+  public enterEvaSurface(): void {
+    this.setManualContext("eva");
+  }
+
+  /**
+   * Feeds corrective crew actions from confirmed protocol steps directly back
+   * into the physical suit/environment model so confirmed fixes stabilize telemetry.
+   */
+  public applyMitigationForStep(protocolId: ProtocolId, stepIndex: number): void {
+    let changed = false;
+    if (protocolId === "shelter" && stepIndex >= 2) {
+      this.mitigatedPresets.add("S-01");
+      changed = true;
+    } else if (protocolId === "air_check" && stepIndex >= 1) {
+      this.mitigatedPresets.add("S-02");
+      this.mitigatedPresets.add("S-03");
+      this.mitigatedPresets.add("S-14");
+      changed = true;
+    } else if (protocolId === "exertion_recovery" && stepIndex >= 1) {
+      this.mitigatedPresets.add("S-04");
+      changed = true;
+    }
+    if (changed) {
+      this.stepSimulation(this.engine.getTime(), true);
+    }
   }
 
   public setManualOverride(id: IndicatorId, value: number): void {
@@ -511,6 +589,7 @@ export class MissionSimulator {
   public resetAll(): void {
     this.playing = false;
     this.activePresets = [];
+    this.mitigatedPresets.clear();
     this.manualOverrides = {};
     this.manualContextLock = null;
     this.lastDailySnapshotDay = 0;

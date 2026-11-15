@@ -80,7 +80,8 @@ export class HudCanvasRenderer {
     elapsedSec: number,
     gazePitchNorm: number,
     liveState: LiveState | null = null,
-    captionState: AssistantCaptionState | null = null
+    captionState: AssistantCaptionState | null = null,
+    audioLevels: { speech: number; mic: number } = { speech: 0, mic: 0 }
   ): void {
     if (this.lastDrawTime >= 0 && nowMs - this.lastDrawTime < this.minFrameIntervalMs) {
       return;
@@ -98,6 +99,9 @@ export class HudCanvasRenderer {
     const breathAlpha = 0.92 + 0.08 * Math.sin(elapsedSec * 1.4);
     const overallClass: AlertClass = liveState?.overallClass ?? 0;
     const overallTheme = this.getAlertColors(overallClass);
+
+    // 0. Subtle peripheral hazard cues (SPE cosmic-ray edge flecks / hypoxia-pressure vignette)
+    this.drawPeripheralHazardFX(ctx, W, H, elapsedSec, liveState, captionState);
 
     // 1. Periodic curved wireframe visor scan sweep
     this.drawScanSweep(ctx, W, H, elapsedSec);
@@ -127,17 +131,17 @@ export class HudCanvasRenderer {
     // 3. Top-Left: Mission Day, Time, Context & SIMULATED DATA pill
     this.drawMissionHeaderBox(ctx, W, H, elapsedSec, bootProgress, liveState);
 
-    // 4. Top-Right: Ranked Active Alert ("why" line) & Active Protocol Step
-    this.drawRankedAlertBox(ctx, W, H, elapsedSec, bootProgress, liveState);
+    // 4. Top-Right: Ranked Active Alert ("why" line), Queue badge & Unresponsive Beacon
+    this.drawRankedAlertBox(ctx, W, H, elapsedSec, bootProgress, liveState, captionState);
 
     // 5. Left Peripheral Telemetry: Radiation & Atmospheric Readouts
     this.drawLeftEnvironmentalGauges(ctx, W, H, bootProgress, liveState);
 
-    // 6. Lower-Left Peripheral Telemetry: Pressure & Cardio Context Vitals
-    this.drawLowerLeftVitalsBox(ctx, W, H, bootProgress, liveState);
+    // 6. Lower-Left Peripheral Telemetry: Pressure, Cardio Vitals & Live BPM-synced ECG wave
+    this.drawLowerLeftVitalsBox(ctx, W, H, elapsedSec, bootProgress, liveState);
 
-    // 7. Bottom-Center Assistant Caption & Voice Status Strip
-    this.drawAssistantCaptionStrip(ctx, W, H, elapsedSec, bootProgress, captionState);
+    // 7. Bottom-Center Assistant Caption, Live Interim Transcript & Voice Waveform Strip
+    this.drawAssistantCaptionStrip(ctx, W, H, elapsedSec, bootProgress, captionState, audioLevels);
 
     // 8. Right Pitch-Driven Vertical Elevation Tape
     this.drawAltitudeTape(ctx, W, H, elapsedSec, gazePitchNorm, bootProgress);
@@ -310,22 +314,75 @@ export class HudCanvasRenderer {
     ctx.restore();
   }
 
+  private drawPeripheralHazardFX(
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    elapsedSec: number,
+    liveState: LiveState | null,
+    captionState: AssistantCaptionState | null
+  ): void {
+    if (!liveState) return;
+    const pio2 = liveState.indicators.pio2.value;
+    const suitP = liveState.indicators.suit_pressure.value;
+    const doseRate = liveState.indicators.dose_rate.value;
+    const isUnresponsive = Boolean(captionState?.unresponsiveEscalated);
+
+    // Hypoxia / Pressure Breach / Emergency red-amber peripheral edge glow (keeps center clear)
+    if (pio2 < 132 || suitP < 31 || isUnresponsive) {
+      const pulse = 0.38 + 0.3 * Math.sin(elapsedSec * (isUnresponsive ? 7.5 : 4.2));
+      const grad = ctx.createRadialGradient(
+        W * 0.5,
+        H * 0.5,
+        W * 0.34,
+        W * 0.5,
+        H * 0.5,
+        W * 0.62
+      );
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(1, `rgba(221, 54, 28, ${(0.28 * pulse).toFixed(3)})`);
+      ctx.save();
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+
+    // Subtle cosmic-ray peripheral edge speckles during elevated SPE radiation storm
+    if (doseRate > 2.5) {
+      const count = Math.min(28, Math.round(doseRate / 8) + 6);
+      ctx.save();
+      for (let i = 0; i < count; i++) {
+        const seed = Math.floor(elapsedSec * 18) * 131 + i * 7919;
+        const rx = ((Math.sin(seed * 12.9898) * 43758.5453) % 1 + 1) % 1;
+        const ry = ((Math.sin(seed * 78.233) * 43758.5453) % 1 + 1) % 1;
+        // Restrict strictly to outer 22% margin so center FOV stays spotless
+        const inCenter = rx > 0.22 && rx < 0.78 && ry > 0.22 && ry < 0.78;
+        if (inCenter) continue;
+        ctx.fillStyle = "rgba(255, 224, 150, 0.55)";
+        ctx.fillRect(rx * W, ry * H, 2 + (i % 3) * 2, 1.5);
+      }
+      ctx.restore();
+    }
+  }
+
   private drawRankedAlertBox(
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
     elapsedSec: number,
     bootProgress: number,
-    liveState: LiveState | null
+    liveState: LiveState | null,
+    captionState: AssistantCaptionState | null
   ): void {
     const x = W * 0.565;
     const y = H * 0.088;
     const w = W * 0.295;
     const primary = liveState?.rankedPrimaryAlert ?? null;
     const protocol = liveState?.activeProtocol;
-    const alertClass: AlertClass = primary?.class ?? 0;
+    const escalated = Boolean(captionState?.unresponsiveEscalated);
+    const alertClass: AlertClass = escalated ? 1 : (primary?.class ?? 0);
     const theme = this.getAlertColors(alertClass);
-    const h = primary ? H * 0.128 : H * 0.072;
+    const h = primary || escalated ? H * 0.132 : H * 0.072;
     const pulse =
       alertClass === 1
         ? 0.52 + 0.48 * Math.sin(elapsedSec * 9.0)
@@ -338,17 +395,17 @@ export class HudCanvasRenderer {
     this.drawChamferBox(ctx, x, y, w, h, w * 0.028);
     ctx.fillStyle = theme.fill;
     ctx.fill();
-    ctx.lineWidth = alertClass >= 2 ? 2.1 : 1.4;
+    ctx.lineWidth = alertClass >= 2 || escalated ? 2.1 : 1.4;
     ctx.strokeStyle = theme.stroke;
     ctx.shadowColor = theme.glow;
-    ctx.shadowBlur = alertClass >= 2 ? 12 : 6;
+    ctx.shadowBlur = alertClass >= 2 || escalated ? 12 : 6;
     ctx.stroke();
 
     ctx.shadowBlur = 0;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
 
-    if (!primary) {
+    if (!primary && !escalated) {
       ctx.fillStyle = HUD_CONFIG.palette.hudCyanBright;
       ctx.font = `700 ${Math.round(H * 0.0155)}px "DM Mono", ui-monospace, monospace`;
       ctx.fillText("SYSTEM WATCH · NO ACTIVE ALERTS", x + w * 0.045, y + h * 0.5);
@@ -356,24 +413,41 @@ export class HudCanvasRenderer {
       return;
     }
 
-    // Line 1: Class badge & title
+    // Line 1: Class badge & title + Queued count pill
     ctx.fillStyle = theme.stroke;
-    ctx.font = `800 ${Math.round(H * 0.0165)}px "DM Mono", ui-monospace, monospace`;
-    ctx.fillText(`CLASS ${primary.class} · ${primary.title}`, x + w * 0.045, y + h * 0.24);
+    ctx.font = `800 ${Math.round(H * 0.016)}px "DM Mono", ui-monospace, monospace`;
+    const headStr = escalated
+      ? "CREW UNRESPONSIVE · HAILING HABITAT"
+      : `CLASS ${primary!.class} · ${primary!.title}`;
+    ctx.fillText(this.truncateText(ctx, headStr, w * 0.68), x + w * 0.045, y + h * 0.23);
 
-    // Line 2: Mandatory "why" evidence line (SIM-HUD-004)
+    const queuedCount = Math.max(
+      liveState?.pausedProtocols?.length ?? 0,
+      Math.max(0, (liveState?.activeAlerts.length ?? 1) - 1)
+    );
+    if (queuedCount > 0) {
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#ffb84d";
+      ctx.font = `700 ${Math.round(H * 0.0125)}px "DM Mono", ui-monospace, monospace`;
+      ctx.fillText(`+${queuedCount} QUEUED`, x + w * 0.955, y + h * 0.23);
+      ctx.textAlign = "left";
+    }
+
+    // Line 2: Mandatory "why" evidence line or escalation delay status
     ctx.fillStyle = "#ffffff";
-    ctx.font = `600 ${Math.round(H * 0.0145)}px "Public Sans", sans-serif`;
-    const whyText = this.truncateText(ctx, primary.whyLine, w * 0.90);
-    ctx.fillText(whyText, x + w * 0.045, y + h * 0.54);
+    ctx.font = `600 ${Math.round(H * 0.014)}px "Public Sans", sans-serif`;
+    const whyText = escalated
+      ? "No crew confirmation >45 s · Telemetry packet queued (~12 min delay)"
+      : this.truncateText(ctx, primary!.whyLine, w * 0.90);
+    ctx.fillText(whyText, x + w * 0.045, y + h * 0.53);
 
     // Line 3: Protocol step prompt or top suggested action
     ctx.fillStyle = theme.text;
-    ctx.font = `600 ${Math.round(H * 0.0135)}px "DM Mono", ui-monospace, monospace`;
+    ctx.font = `600 ${Math.round(H * 0.0132)}px "DM Mono", ui-monospace, monospace`;
     const actionLine =
       protocol && !protocol.completed
         ? `STEP ${protocol.currentStepIndex + 1}/${protocol.totalSteps}: ${protocol.currentStep.instruction}`
-        : primary.suggestedActions[0] ?? "Acknowledge and monitor";
+        : primary?.suggestedActions[0] ?? "Say CONFIRM or acknowledge immediately";
     ctx.fillText(this.truncateText(ctx, actionLine, w * 0.90), x + w * 0.045, y + h * 0.81);
     ctx.restore();
   }
@@ -479,13 +553,14 @@ export class HudCanvasRenderer {
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
+    elapsedSec: number,
     bootProgress: number,
     liveState: LiveState | null
   ): void {
     const x = W * 0.135;
-    const y = H * 0.625;
+    const y = H * 0.608;
     const w = W * 0.165;
-    const h = H * 0.168;
+    const h = H * 0.188;
 
     const isEva = liveState?.context.activity === "eva";
     const pressInd = isEva
@@ -519,35 +594,63 @@ export class HudCanvasRenderer {
       },
       {
         k: "HEART RATE",
-        v: `${Math.round(hrInd?.value ?? 62)} bpm`,
+        v: `${Math.round(hrInd?.value ?? 104)} bpm`,
         cls: hrInd?.alertClass ?? 0,
       },
       {
         k: "HRV (RMSSD)",
-        v: `${Math.round(hrvInd?.value ?? 55)} ms`,
+        v: `${Math.round(hrvInd?.value ?? 48)} ms`,
         cls: hrvInd?.alertClass ?? 0,
       },
       {
         k: "RESPIRATION",
-        v: `${Math.round(respInd?.value ?? 14)} br/m`,
+        v: `${Math.round(respInd?.value ?? 20)} br/m`,
         cls: respInd?.alertClass ?? 0,
       },
     ];
 
     ctx.textBaseline = "middle";
     lines.forEach((line, i) => {
-      const ly = y + h * (0.17 + i * 0.22);
+      const ly = y + h * (0.14 + i * 0.19);
       const tLine = this.getAlertColors(line.cls);
       ctx.textAlign = "left";
       ctx.fillStyle = "#96c2ff";
-      ctx.font = `700 ${Math.round(H * 0.0125)}px "DM Mono", ui-monospace, monospace`;
+      ctx.font = `700 ${Math.round(H * 0.012)}px "DM Mono", ui-monospace, monospace`;
       ctx.fillText(line.k, x + w * 0.06, ly);
 
       ctx.textAlign = "right";
       ctx.fillStyle = line.cls > 0 ? tLine.stroke : "#ffffff";
-      ctx.font = `700 ${Math.round(H * 0.0155)}px "DM Mono", ui-monospace, monospace`;
+      ctx.font = `700 ${Math.round(H * 0.015)}px "DM Mono", ui-monospace, monospace`;
       ctx.fillText(line.v, x + w * 0.94, ly);
     });
+
+    // Live BPM-synchronized ECG QRS trace along bottom strip of vitals card
+    const bpm = Math.max(45, Math.min(200, hrInd?.value ?? 104));
+    const beatsPerSec = bpm / 60;
+    const ecgX = x + w * 0.06;
+    const ecgW = w * 0.88;
+    const ecgMidY = y + h * 0.885;
+    const ecgAmp = h * 0.07;
+
+    ctx.strokeStyle = maxClass >= 2 ? theme.stroke : "#2ef2ff";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    const samples = 44;
+    for (let i = 0; i <= samples; i++) {
+      const frac = i / samples;
+      const phase = ((elapsedSec * beatsPerSec - (1 - frac) * 1.4) % 1 + 1) % 1;
+      let wave = 0;
+      if (phase > 0.12 && phase < 0.2) wave = 0.22 * Math.sin(((phase - 0.12) / 0.08) * Math.PI);
+      else if (phase >= 0.25 && phase < 0.28) wave = -0.25;
+      else if (phase >= 0.28 && phase < 0.32) wave = 1.0;
+      else if (phase >= 0.32 && phase < 0.36) wave = -0.35;
+      else if (phase >= 0.45 && phase < 0.58) wave = 0.26 * Math.sin(((phase - 0.45) / 0.13) * Math.PI);
+      const px = ecgX + frac * ecgW;
+      const py = ecgMidY - wave * ecgAmp;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -557,19 +660,24 @@ export class HudCanvasRenderer {
     H: number,
     elapsedSec: number,
     bootProgress: number,
-    captionState: AssistantCaptionState | null
+    captionState: AssistantCaptionState | null,
+    audioLevels: { speech: number; mic: number }
   ): void {
     const x = W * 0.32;
-    const y = H * 0.805;
+    const y = H * 0.802;
     const w = W * 0.43;
-    const h = H * 0.088;
+    const h = H * 0.092;
 
     const voiceOn = captionState?.voiceConnected ?? false;
     const listening = captionState?.isListening ?? false;
+    const speaking = captionState?.isSpeaking ?? false;
     const busy = captionState?.isBusy ?? false;
-    const captionText =
-      captionState?.text ||
-      "Assistant standing by (voice off). Ask via panel or toggle Voice Ready.";
+    const interim = captionState?.interimTranscript?.trim() ?? "";
+
+    const captionText = interim
+      ? `[CREW LIVE] “${interim}”`
+      : captionState?.text ||
+        "Monitoring EVA systems, Sir. Ask by voice or type below.";
 
     const borderColor = listening
       ? "#02bfe7"
@@ -580,31 +688,53 @@ export class HudCanvasRenderer {
     ctx.save();
     ctx.globalAlpha = 0.45 + 0.55 * bootProgress;
     this.drawChamferBox(ctx, x, y, w, h, 8);
-    ctx.fillStyle = "rgba(6, 20, 46, 0.54)";
+    ctx.fillStyle = "rgba(6, 20, 46, 0.56)";
     ctx.fill();
-    ctx.lineWidth = listening ? 2.0 : 1.2;
+    ctx.lineWidth = listening || speaking ? 2.0 : 1.2;
     ctx.strokeStyle = borderColor;
     ctx.stroke();
 
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
-    const statusDot = listening
-      ? `LISTENING${".".repeat((Math.floor(elapsedSec * 3) % 3) + 1)}`
-      : busy
-        ? "THINKING..."
-        : voiceOn
-          ? "VOICE CONNECTED · LIVE"
-          : "VOICE STANDBY · TEXT/ON-DEMAND";
+    const statusDot = interim
+      ? "CREW SPEAKING · LIVE"
+      : speaking
+        ? "TRANSMITTING AUDIO"
+        : listening
+          ? `OPEN MIC ACTIVE${".".repeat((Math.floor(elapsedSec * 3) % 3) + 1)}`
+          : busy
+            ? "PROCESSING..."
+            : voiceOn
+              ? "SUIT COMMS LIVE"
+              : "COMMS MUTED · TEXT MODE";
 
-    ctx.fillStyle = listening ? "#02bfe7" : "#96c2ff";
-    ctx.font = `700 ${Math.round(H * 0.012)}px "DM Mono", ui-monospace, monospace`;
+    ctx.fillStyle = interim || listening ? "#02bfe7" : "#96c2ff";
+    ctx.font = `700 ${Math.round(H * 0.0118)}px "DM Mono", ui-monospace, monospace`;
     ctx.fillText(
-      `CREW ASSISTANT (${captionState?.speaker ?? "ASSISTANT"}) · ${statusDot}`,
+      `ARASAKA (${captionState?.speaker ?? "ASSISTANT"}) · ${statusDot}`,
       x + w * 0.035,
-      y + h * 0.25
+      y + h * 0.24
     );
 
-    ctx.fillStyle = "#ffffff";
+    // Live audio visualizer bars on right side of caption header
+    const bars = 12;
+    const activeAmp = speaking
+      ? Math.max(0.25, audioLevels.speech)
+      : listening
+        ? Math.max(0.12, audioLevels.mic)
+        : 0.06;
+    const barsW = w * 0.14;
+    const barsStartX = x + w * 0.825;
+    const barGap = barsW / bars;
+    for (let b = 0; b < bars; b++) {
+      const wave =
+        0.35 + 0.65 * Math.abs(Math.sin(elapsedSec * (speaking ? 14 : 6) + b * 0.85));
+      const bh = Math.max(2, activeAmp * wave * h * 0.22);
+      ctx.fillStyle = speaking ? "#38ef7d" : listening ? "#02bfe7" : "rgba(150, 194, 255, 0.35)";
+      ctx.fillRect(barsStartX + b * barGap, y + h * 0.24 - bh * 0.5, Math.max(2, barGap * 0.55), bh);
+    }
+
+    ctx.fillStyle = interim ? "#b9f4ff" : "#ffffff";
     ctx.font = `500 ${Math.round(H * 0.0145)}px "Public Sans", sans-serif`;
     const wrapped = this.wrapText(ctx, captionText, w * 0.93, 2);
     wrapped.forEach((line, idx) => {

@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
-import { AZURE_VOICES, type AzureVoiceId } from "../assistant/voiceService";
+import type { CrewCallsign } from "../assistant/assistantController";
+import { AZURE_VOICE_OPTIONS, type AzureVoiceId } from "../assistant/voiceService";
 import { TERRAIN_SOURCES } from "../engine/config";
 import type { CrewHealthEngine } from "../engine/engine";
 import type { LiveState } from "../engine/types";
@@ -14,6 +15,12 @@ export interface SettingsModalProps {
   selectedVoice: AzureVoiceId;
   onSelectVoice: (voice: AzureVoiceId) => void;
   onTestVoice: () => void;
+  radioFilterEnabled: boolean;
+  onToggleRadioFilter: (enabled: boolean) => void;
+  sfxEnabled: boolean;
+  onToggleSfx: (enabled: boolean) => void;
+  callsign: CrewCallsign;
+  onChangeCallsign: (callsign: CrewCallsign) => void;
   cloudStatus: "ready" | "fallback" | "checking";
   onProbeCloud: () => void;
   proxyBaseUrl: string;
@@ -32,6 +39,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   selectedVoice,
   onSelectVoice,
   onTestVoice,
+  radioFilterEnabled,
+  onToggleRadioFilter,
+  sfxEnabled,
+  onToggleSfx,
+  callsign,
+  onChangeCallsign,
   cloudStatus,
   onProbeCloud,
   proxyBaseUrl,
@@ -112,7 +125,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 value={selectedVoice}
                 onChange={(e) => onSelectVoice(e.target.value as AzureVoiceId)}
               >
-                {AZURE_VOICES.map((v) => (
+                {AZURE_VOICE_OPTIONS.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.label} ({v.id})
                   </option>
@@ -120,8 +133,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </select>
             </div>
 
+            <div className="grid-2" style={{ marginBottom: 10 }}>
+              <button
+                type="button"
+                className={`chip-btn ${radioFilterEnabled ? "active" : ""}`}
+                onClick={() => onToggleRadioFilter(!radioFilterEnabled)}
+              >
+                Helmet Radio Filter: {radioFilterEnabled ? "ON" : "OFF"}
+              </button>
+              <button
+                type="button"
+                className={`chip-btn ${sfxEnabled ? "active" : ""}`}
+                onClick={() => onToggleSfx(!sfxEnabled)}
+              >
+                NASA C&amp;W Alert Tones: {sfxEnabled ? "ON" : "OFF"}
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11.5, color: "#aeb0b5", marginBottom: 4 }}>
+                AI Address Persona
+              </div>
+              <div className="chip-row">
+                {(["Sir", "Commander"] as const).map((cs) => (
+                  <button
+                    key={cs}
+                    type="button"
+                    className={`chip-btn ${callsign === cs ? "active" : ""}`}
+                    onClick={() => onChangeCallsign(cs)}
+                  >
+                    Address as &ldquo;{cs}&rdquo;
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="mono" style={{ fontSize: 11, color: "#aeb0b5" }}>
-              Browser Speech-to-Text (Mic): {sttSupported ? "Supported" : "Unavailable in this browser"}
+              Browser Speech-to-Text (Live Duplex Mic): {sttSupported ? "Supported" : "Unavailable in this browser"}
             </div>
           </section>
 

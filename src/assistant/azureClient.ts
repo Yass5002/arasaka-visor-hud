@@ -18,6 +18,14 @@ export interface ChatToolSpec {
   };
 }
 
+export interface ProxyHealth {
+  ok: boolean;
+  deployment?: string;
+  speechRegion?: string;
+  hasLlmKey?: boolean;
+  hasSpeechKey?: boolean;
+}
+
 export const DEFAULT_PROXY_BASE_URL =
   import.meta.env.VITE_PROXY_URL ||
   (typeof window !== "undefined" && window.location.hostname === "nasa.yssn.tech"
@@ -39,7 +47,7 @@ export class AzureProxyClient {
     return this.baseUrl;
   }
 
-  public async checkHealth(): Promise<{ ok: boolean; deployment?: string; speechRegion?: string }> {
+  public async checkHealth(): Promise<ProxyHealth> {
     try {
       const res = await fetch(`${this.baseUrl}/api/health`, { method: "GET" });
       if (!res.ok) return { ok: false };
@@ -80,11 +88,15 @@ export class AzureProxyClient {
     return { message: choice };
   }
 
-  public async synthesizeSpeech(text: string, voice: string): Promise<ArrayBuffer> {
+  public async synthesizeSpeech(
+    text: string,
+    voice: string,
+    urgency: "nominal" | "advisory" | "caution" | "emergency" = "nominal"
+  ): Promise<ArrayBuffer> {
     const res = await fetch(`${this.baseUrl}/api/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice }),
+      body: JSON.stringify({ text, voice, urgency }),
     });
     if (!res.ok) {
       throw new Error(`Azure TTS HTTP ${res.status}`);

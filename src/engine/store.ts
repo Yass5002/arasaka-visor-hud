@@ -53,6 +53,7 @@ export class EngineStore {
   public activeAlerts: AlertObject[] = [];
   public cooldownUntilByArea: Partial<Record<HealthArea, number>> = {};
   public activeProtocol: ActiveProtocolState | null = null;
+  public pausedProtocols: ActiveProtocolState[] = [];
 
   constructor(
     missionLengthDays: 180 | 1000,
@@ -383,6 +384,10 @@ export class EngineStore {
             completedSteps: [...this.activeProtocol.completedSteps],
           }
         : null,
+      pausedProtocols: this.pausedProtocols.map((p) => ({
+        ...p,
+        completedSteps: [...p.completedSteps],
+      })),
     };
   }
 
@@ -464,6 +469,10 @@ export class EngineStore {
           completedSteps: [...snap.activeProtocol.completedSteps],
         }
       : null;
+    this.pausedProtocols = (snap.pausedProtocols ?? []).map((p) => ({
+      ...p,
+      completedSteps: [...p.completedSteps],
+    }));
   }
 
   public exportAllJson(): string {

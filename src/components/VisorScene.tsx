@@ -8,6 +8,7 @@ import { buildHelmetGroup } from "../three/buildHelmetGroup";
 import { buildVisorGlass } from "../three/buildVisorGlass";
 import { HelmetDofComposite } from "../three/HelmetDofComposite";
 import { HudCanvasRenderer } from "../hud/HudCanvasRenderer";
+import { PRELOADED_IMAGES } from "../services/assetPreloader";
 
 function computePanHalf(viewportAspect: number): [number, number] {
   const { panoramaAspect, panoramaCoverScale } = MOTION_CONFIG;
@@ -40,14 +41,18 @@ function clampSigned(v: number, maxAbs: number): number {
 export interface VisorSceneProps {
   liveStateRef?: React.MutableRefObject<LiveState | null>;
   captionRef?: React.MutableRefObject<AssistantCaptionState | null>;
+  sampleAudioLevels?: () => { speech: number; mic: number };
   terrainId?: "mars" | "moon" | "orbit";
 }
 
 export const VisorScene: React.FC<VisorSceneProps> = ({
   liveStateRef,
   captionRef,
+  sampleAudioLevels,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const sampleAudioRef = useRef(sampleAudioLevels);
+  sampleAudioRef.current = sampleAudioLevels;
 
   useEffect(() => {
     const container = mountRef.current;
@@ -120,10 +125,18 @@ export const VisorScene: React.FC<VisorSceneProps> = ({
       return tex;
     };
 
+    const loadOrCachedTex = (url: string) => {
+      const preloaded = PRELOADED_IMAGES.get(url);
+      if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {
+        return configurePanoramaTex(new THREE.Texture(preloaded));
+      }
+      return configurePanoramaTex(loader.load(url));
+    };
+
     const base = import.meta.env.BASE_URL;
-    const skyTex = configurePanoramaTex(loader.load(`${base}mars/mars-sky.webp`));
-    const terrainTex = configurePanoramaTex(loader.load(`${base}mars/mars-terrain.webp`));
-    const depthTex = configurePanoramaTex(loader.load(`${base}mars/mars-depth.png`));
+    const skyTex = loadOrCachedTex(`${base}mars/mars-sky.webp`);
+    const terrainTex = loadOrCachedTex(`${base}mars/mars-terrain.webp`);
+    const depthTex = loadOrCachedTex(`${base}mars/mars-depth.png`);
 
     const [initPanW, initPanH] = computePanHalf(initAspect);
     const panUniforms = {
@@ -465,7 +478,8 @@ export const VisorScene: React.FC<VisorSceneProps> = ({
         elapsedSec,
         pitchNorm,
         liveStateRef?.current ?? null,
-        captionRef?.current ?? null
+        captionRef?.current ?? null,
+        sampleAudioRef.current?.() ?? { speech: 0, mic: 0 }
       );
       visorGlass.updateUniforms(camera.matrixWorldInverse);
 

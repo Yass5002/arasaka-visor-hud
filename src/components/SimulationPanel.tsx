@@ -117,9 +117,15 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
     );
   };
 
-  const fastPresets = PRESET_CATALOGUE.filter((p) => p.group === "fast_event");
-  const slowPresets = PRESET_CATALOGUE.filter((p) => p.group === "slow_drift");
-  const smartPresets = PRESET_CATALOGUE.filter((p) => p.group === "smart_case");
+  const fastPresets = PRESET_CATALOGUE.filter(
+    (p) => p.group === "fast_event" && p.scope === "eva_surface"
+  );
+  const slowPresets = PRESET_CATALOGUE.filter(
+    (p) => p.group === "slow_drift" && p.scope === "eva_surface"
+  );
+  const smartPresets = PRESET_CATALOGUE.filter(
+    (p) => p.group === "smart_case" && p.scope === "eva_surface"
+  );
 
   const areaIndicators = (Object.keys(INDICATOR_META) as IndicatorId[])
     .map((id) => INDICATOR_META[id])
@@ -136,9 +142,9 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
       <aside className="settings-drawer" aria-label="Mission Events and Simulation Studio">
         <div className="drawer-header">
           <div>
-            <div className="drawer-title">SIMULATION &amp; EVENTS STUDIO</div>
+            <div className="drawer-title">EVA SURFACE EVENTS &amp; SIMULATION</div>
             <div className="mono" style={{ fontSize: 10.5, color: "#96c2ff" }}>
-              Clock · Context · Scenario Presets (S-01..S-13b) · Manual Sliders
+              Outside-Cabin Mars Surface Scenarios · Clock · Sensor Sliders
             </div>
           </div>
           <button type="button" className="hds-btn" onClick={onClose}>
@@ -236,10 +242,10 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
             </div>
           </section>
 
-          {/* Preset Events */}
+          {/* Preset Events (Strictly Outside-Cabin Mars EVA Testable Scenarios) */}
           <section className="hds-card">
             <div className="hds-card-title">
-              <span>Fast Events (S-01 .. S-05)</span>
+              <span>Surface EVA Emergencies &amp; Suit Hazards</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {fastPresets.map(renderPresetCard)}
@@ -248,7 +254,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
 
           <section className="hds-card">
             <div className="hds-card-title">
-              <span>Slow Drifts (S-06 .. S-11)</span>
+              <span>Cumulative EVA Dose Limit</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {slowPresets.map(renderPresetCard)}
@@ -257,7 +263,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
 
           <section className="hds-card">
             <div className="hds-card-title">
-              <span>Smart Cases (S-12, S-13, S-13b)</span>
+              <span>Multi-Hazard Cascade &amp; Context Guard</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {smartPresets.map(renderPresetCard)}

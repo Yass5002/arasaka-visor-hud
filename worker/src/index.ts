@@ -122,8 +122,15 @@ export default {
         });
       }
 
-      const { text, voice = "en-US-AndrewMultilingualNeural" } =
-        await request.json<{ text: string; voice?: string }>();
+      const {
+        text,
+        voice = "en-US-AndrewMultilingualNeural",
+        urgency = "nominal",
+      } = await request.json<{
+        text: string;
+        voice?: string;
+        urgency?: "nominal" | "advisory" | "caution" | "emergency";
+      }>();
 
       if (!text || !text.trim()) {
         return new Response(JSON.stringify({ error: "Missing text" }), {
@@ -134,9 +141,19 @@ export default {
 
       const langMatch = voice.match(/^([a-z]{2}-[A-Z]{2})/);
       const lang = langMatch ? langMatch[1] : "en-US";
+      const prosodyRate =
+        urgency === "emergency"
+          ? "+14%"
+          : urgency === "caution"
+            ? "+7%"
+            : urgency === "advisory"
+              ? "+3%"
+              : "0%";
+      const prosodyPitch =
+        urgency === "emergency" ? "+2%" : urgency === "caution" ? "+1%" : "0%";
       const ssml = `<speak version='1.0' xml:lang='${lang}'><voice xml:lang='${lang}' name='${escapeXml(
         voice
-      )}'>${escapeXml(text)}</voice></speak>`;
+      )}'><prosody rate='${prosodyRate}' pitch='${prosodyPitch}'>${escapeXml(text)}</prosody></voice></speak>`;
 
       const ttsUrl = `https://${env.AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`;
       const res = await fetch(ttsUrl, {
