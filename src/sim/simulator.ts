@@ -360,7 +360,8 @@ export class MissionSimulator {
           const frac = Math.min(1, Math.max(0.4, dtDays / 14));
           stress = Math.max(stress, 62 * frac);
           cortisol = Math.max(cortisol, 82 * frac);
-          doseRate = Math.max(doseRate, 2.2);
+          // Elevated cosmic background without crossing the 1.75 mSv/d solar flare alert threshold
+          doseRate = Math.max(doseRate, 0.95);
           break;
         }
         case "S-09": {
@@ -517,12 +518,55 @@ export class MissionSimulator {
     if (!def) return {};
 
     if (def.supportsScenarioStart) {
-      this.firePreset(def.id, "scenario_start");
+      const hasActiveEvents =
+        this.activePresets.length > 0 || this.engine.getLiveState().activeAlerts.length > 0;
+      if (!hasActiveEvents && this.engine.getTime() < 86400) {
+        this.firePreset(def.id, "scenario_start");
+        return { suggestedSpeed: def.recommendedSpeed ?? 86400 };
+      }
+
+      // Stack slow-drift scenario onto active hazards without wiping existing emergencies
+      const nowT = this.engine.getTime();
+      const startDays = def.scenarioStartDays ?? 14;
+      this.mitigatedPresets.delete(def.id);
+      this.activePresets = this.activePresets.filter((p) => p.id !== def.id);
+      this.activePresets.push({
+        id: def.id,
+        startT: nowT - startDays * 86400,
+        definition: def,
+      });
+
+      const currentDay = Math.floor(nowT / 86400) + 1;
+      if (def.id === "S-06" || def.id === "S-08") {
+        const span = def.id === "S-08" ? 14 : 7;
+        for (let offset = 0; offset < span; offset++) {
+          this.engine.store.sleepHistoryByDay[Math.max(1, currentDay - offset)] = 5.4;
+        }
+      }
+      if (def.id === "S-11") {
+        this.engine.store.cumulativeDoseMsv = Math.max(this.engine.store.cumulativeDoseMsv, 465);
+      }
+      if (def.id === "S-07") {
+        let targetT = Math.max(nowT, 14 * 86400 + 60);
+        if (this.engine.store.getExerciseSessionsInTrailingDays(targetT, 14) > 0) {
+          targetT += 14 * 86400;
+        }
+        if (targetT > nowT) {
+          this.engine.store.lastDoseSampleT = targetT - 60;
+          this.engine.store.lastBoneUpdateT = targetT - 60;
+        }
+        this.engine.ingestEvent(targetT, "preset_fired", { presetId: def.id, mode: "stacked" });
+        this.stepSimulation(targetT, true);
+        return { suggestedSpeed: def.recommendedSpeed ?? 86400 };
+      }
+
+      this.engine.ingestEvent(nowT, "preset_fired", { presetId: def.id, mode: "stacked" });
+      this.stepSimulation(nowT, true);
       return { suggestedSpeed: def.recommendedSpeed ?? 86400 };
     }
 
     if (def.id === "S-02") {
-      // Seed clean nominal air first if sparse, fire S-02, then advance 48 min silently to Class 3 cusp -> live alert
+      // Advance 48 min from clean scrubber failure onset so 1-hr CO2 mean hits Class 3 right away
       this.firePreset("S-02", "forward");
       const start = this.engine.getTime();
       for (let dt = 60; dt < 48 * 60; dt += 60) {
@@ -559,47 +603,57 @@ export class MissionSimulator {
   public executeSuitAction(action: SuitActionName): { ok: boolean; effect: string } {
     this.activeSuitActions.add(action);
     const nowT = this.engine.getTime();
-    let effect = `Executed ${action}.`;
+    let effect = `Action complete: ${action}.`;
 
     switch (action) {
       case "engage_terrain_shield": {
         this.mitigatedPresets.add("S-01");
         this.mitigatedPresets.add("S-12");
         this.activePresets = this.activePresets.filter((p) => p.id !== "S-01" && p.id !== "S-12");
-        effect = "Terrain/PLSS shielding active (~82% particle flux attenuation).";
+        delete this.manualOverrides.dose_rate;
+        delete this.manualOverrides.solar_event_flag;
+        effect = "Terrain and suit backpack shielding active, cutting incoming radiation.";
         break;
       }
       case "switch_secondary_o2": {
         this.mitigatedPresets.add("S-03");
         this.activePresets = this.activePresets.filter((p) => p.id !== "S-03");
-        effect = "Switched to secondary high-pressure O₂ feed; inspired PIO₂ restoring to 152 mmHg.";
+        delete this.manualOverrides.pio2;
+        effect = "Switched to backup oxygen tank. Oxygen levels are climbing back to normal.";
         break;
       }
       case "open_loop_o2_purge": {
         this.mitigatedPresets.add("S-02");
         this.activePresets = this.activePresets.filter((p) => p.id !== "S-02");
+        delete this.manualOverrides.ppco2;
         this.engine.store.rollingWindowFloorByIndicator.ppco2 = nowT;
-        effect = "Open-loop O₂ purge flushing helmet CO₂ toward 1.55 mmHg baseline.";
+        effect = "Open-loop oxygen flush active, clearing carbon dioxide from the helmet.";
         break;
       }
       case "seal_suit_breach": {
         this.mitigatedPresets.add("S-14");
         this.activePresets = this.activePresets.filter((p) => p.id !== "S-14");
-        effect = "Bypass isolation & emergency patch engaged; suit pressure stabilizing ~41.2 kPa.";
+        delete this.manualOverrides.suit_pressure;
+        delete this.manualOverrides.cabin_pressure;
+        effect = "Suit breach clamped and bypass active. Suit pressure is holding steady.";
         break;
       }
       case "rest_recovery_mode": {
         this.mitigatedPresets.add("S-04");
-        this.activePresets = this.activePresets.filter((p) => p.id !== "S-04");
-        effect = "EVA exertion hold active; heart rate and O₂ consumption trending toward baseline.";
+        this.mitigatedPresets.add("S-13b");
+        this.activePresets = this.activePresets.filter((p) => p.id !== "S-04" && p.id !== "S-13b");
+        delete this.manualOverrides.heart_rate;
+        delete this.manualOverrides.hrv_rmssd;
+        delete this.manualOverrides.o2_consumption;
+        effect = "Rest mode active. Heart rate and breathing load are settling.";
         break;
       }
       case "hail_flight_surgeon": {
-        effect = "Telemetry burst queued on high-gain antenna for Habitat CMO / Flight Surgeon (~12 min relay).";
+        effect = "High-gain radio packet queued for habitat medical team (12-minute relay).";
         break;
       }
       case "silence_alarm": {
-        effect = "Master Caution & Warning audio loops muted.";
+        effect = "Caution and warning horns silenced.";
         break;
       }
     }
@@ -631,27 +685,83 @@ export class MissionSimulator {
     stepIndex: number,
     notifyNow = false
   ): void {
+    if (stepIndex < 1) return;
+    const nowT = this.engine.getTime();
     let changed = false;
-    if (protocolId === "shelter" && stepIndex >= 1) {
+
+    if (protocolId === "shelter") {
       this.mitigatedPresets.add("S-01");
       this.mitigatedPresets.add("S-12");
       this.activePresets = this.activePresets.filter((p) => p.id !== "S-01" && p.id !== "S-12");
+      delete this.manualOverrides.dose_rate;
+      delete this.manualOverrides.solar_event_flag;
       changed = true;
-    } else if (protocolId === "air_check" && stepIndex >= 1) {
+    } else if (protocolId === "air_check") {
       this.mitigatedPresets.add("S-02");
       this.mitigatedPresets.add("S-03");
       this.mitigatedPresets.add("S-14");
       this.activePresets = this.activePresets.filter(
         (p) => p.id !== "S-02" && p.id !== "S-03" && p.id !== "S-14"
       );
+      delete this.manualOverrides.ppco2;
+      delete this.manualOverrides.pio2;
+      delete this.manualOverrides.suit_pressure;
+      delete this.manualOverrides.cabin_pressure;
+      this.engine.store.rollingWindowFloorByIndicator.ppco2 = nowT;
       changed = true;
-    } else if (protocolId === "exertion_recovery" && stepIndex >= 1) {
+    } else if (protocolId === "exertion_recovery") {
       this.mitigatedPresets.add("S-04");
-      this.activePresets = this.activePresets.filter((p) => p.id !== "S-04");
+      this.mitigatedPresets.add("S-13b");
+      this.activePresets = this.activePresets.filter((p) => p.id !== "S-04" && p.id !== "S-13b");
+      delete this.manualOverrides.heart_rate;
+      delete this.manualOverrides.hrv_rmssd;
+      delete this.manualOverrides.o2_consumption;
+      changed = true;
+    } else if (protocolId === "orthostatic_response") {
+      this.mitigatedPresets.add("S-05");
+      this.activePresets = this.activePresets.filter((p) => p.id !== "S-05");
+      delete this.manualOverrides.orthostatic_drop;
+      changed = true;
+    } else if (protocolId === "resistive_exercise") {
+      this.mitigatedPresets.add("S-07");
+      this.activePresets = this.activePresets.filter((p) => p.id !== "S-07");
+      this.engine.ingestEvent(
+        nowT,
+        "exercise_session",
+        {
+          durationMin: this.engine.store.profile.exerciseSessionMinutes,
+          device: "Strength unit",
+          source: "protocol",
+        },
+        undefined,
+        false
+      );
+      changed = true;
+    } else if (protocolId === "sleep_reset") {
+      this.mitigatedPresets.add("S-06");
+      this.mitigatedPresets.add("S-08");
+      this.mitigatedPresets.add("S-12");
+      this.activePresets = this.activePresets.filter(
+        (p) => p.id !== "S-06" && p.id !== "S-08" && p.id !== "S-12"
+      );
+      const day = Math.floor(nowT / 86400) + 1;
+      for (let offset = 0; offset < 7; offset++) {
+        this.engine.store.sleepHistoryByDay[Math.max(1, day - offset)] =
+          this.engine.store.profile.usualSleepHours;
+      }
+      delete this.manualOverrides.stress_score;
+      delete this.manualOverrides.cortisol_trend;
+      changed = true;
+    } else if (protocolId === "calm_breathing") {
+      this.mitigatedPresets.add("S-09");
+      this.mitigatedPresets.add("S-12");
+      this.activePresets = this.activePresets.filter((p) => p.id !== "S-09" && p.id !== "S-12");
+      delete this.manualOverrides.stress_score;
       changed = true;
     }
+
     if (changed) {
-      this.stepSimulation(this.engine.getTime(), notifyNow);
+      this.stepSimulation(nowT, notifyNow);
     }
   }
 
@@ -692,10 +802,10 @@ export class MissionSimulator {
     const custom: PresetDefinition = {
       id: `CUSTOM-${Date.now()}`,
       code: "CUSTOM",
-      name: name.trim() || "Custom Snapshot",
+      name: name.trim() || "Saved Scenario",
       group: "custom",
-      summary: "Operator-saved indicator state.",
-      basis: "Demo (Operator Custom Preset)",
+      summary: "Custom readings saved during your test.",
+      basis: "Custom Scenario",
       customOverrides: overrides,
     };
     this.customPresets.push(custom);

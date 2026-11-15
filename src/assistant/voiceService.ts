@@ -15,10 +15,10 @@ export const AZURE_VOICES: Record<VoiceGender, AzureVoiceId> = {
 };
 
 export const AZURE_VOICE_OPTIONS: ReadonlyArray<{ id: AzureVoiceId; label: string }> = [
-  { id: "en-US-AndrewMultilingualNeural", label: "Andrew — Composed Suit AI (Male)" },
-  { id: "en-US-AvaMultilingualNeural", label: "Ava — Warm Aerospace AI (Female)" },
-  { id: "en-US-BrianMultilingualNeural", label: "Brian — Mission Flight Controller (Male)" },
-  { id: "en-US-EmmaMultilingualNeural", label: "Emma — Crisp Telemetry Lead (Female)" },
+  { id: "en-US-AndrewMultilingualNeural", label: "Andrew (Calm Suit Voice, Male)" },
+  { id: "en-US-AvaMultilingualNeural", label: "Ava (Warm Mission Voice, Female)" },
+  { id: "en-US-BrianMultilingualNeural", label: "Brian (Flight Controller, Male)" },
+  { id: "en-US-EmmaMultilingualNeural", label: "Emma (Clear Mission Voice, Female)" },
 ];
 
 interface SpeechRecognitionAlternativeLike {
@@ -82,8 +82,10 @@ export class VoiceService {
   private micCooldownUntilMs = 0;
 
   private currentAudioUrl: string | null = null;
+  private activeTtsAbort: AbortController | null = null;
   private player: HTMLAudioElement | null = null;
   private speechGeneration = 0;
+  private queueGeneration = 0;
   private speechQueueTail: Promise<void> = Promise.resolve();
   private pendingSpeechCount = 0;
   private pendingNormalizedTexts = new Set<string>();
@@ -92,6 +94,7 @@ export class VoiceService {
   private settleCurrentPlayback: (() => void) | null = null;
   private isSpeaking = false;
   private lastSpokeEndedAtMs = 0;
+  private consecutiveQuickEnds = 0;
 
   public onSpeakingChange?: (speaking: boolean) => void;
 
@@ -177,7 +180,7 @@ export class VoiceService {
     }
   }
 
-  private scheduleRecognitionResumeAfterTx(delayMs = 850): void {
+  private scheduleRecognitionResumeAfterTx(delayMs = 350): void {
     if (!this.keepListening || !this.activeRecCtor || this.isTxActive || this.pendingSpeechCount > 0) {
       return;
     }
@@ -192,13 +195,29 @@ export class VoiceService {
     }, delayMs);
   }
 
+  /** Drops any unstarted queued speech lines without cutting off the current utterance mid-word. */
+  public clearPendingQueue(): void {
+    this.queueGeneration += 1;
+    this.pendingNormalizedTexts.clear();
+  }
+
   public stopSpeech(): void {
     this.speechGeneration += 1;
+    this.queueGeneration += 1;
     this.speechQueueTail = Promise.resolve();
     this.pendingSpeechCount = 0;
     this.pendingNormalizedTexts.clear();
     this.isTxActive = false;
     this.activeUrgency = "nominal";
+
+    if (this.activeTtsAbort) {
+      try {
+        this.activeTtsAbort.abort();
+      } catch {
+        // ignore
+      }
+      this.activeTtsAbort = null;
+    }
 
     const settle = this.settleCurrentPlayback;
     this.settleCurrentPlayback = null;
@@ -228,8 +247,8 @@ export class VoiceService {
       window.speechSynthesis.cancel();
     }
     this.setSpeaking(false);
-    this.micCooldownUntilMs = Date.now() + 300;
-    this.scheduleRecognitionResumeAfterTx(300);
+    this.micCooldownUntilMs = Date.now() + 250;
+    this.scheduleRecognitionResumeAfterTx(250);
   }
 
   public speak(
@@ -258,10 +277,17 @@ export class VoiceService {
     this.pendingNormalizedTexts.add(norm);
     this.pendingSpeechCount += 1;
     const targetGen = this.speechGeneration;
+    const targetQueueGen = this.queueGeneration;
 
     const job = async () => {
       try {
-        if (targetGen !== this.speechGeneration || !this.enabled) return;
+        if (
+          targetGen !== this.speechGeneration ||
+          targetQueueGen !== this.queueGeneration ||
+          !this.enabled
+        ) {
+          return;
+        }
         this.isTxActive = true;
         this.activeUrgency = urgency;
         this.pauseRecognitionForTx();
@@ -272,8 +298,8 @@ export class VoiceService {
         if (targetGen === this.speechGeneration && this.pendingSpeechCount === 0) {
           this.isTxActive = false;
           this.activeUrgency = "nominal";
-          this.micCooldownUntilMs = Date.now() + 850;
-          this.scheduleRecognitionResumeAfterTx(850);
+          this.micCooldownUntilMs = Date.now() + 350;
+          this.scheduleRecognitionResumeAfterTx(350);
         }
       }
     };
@@ -294,14 +320,24 @@ export class VoiceService {
     if (this.recentSpokenNormalized.length > 5) {
       this.recentSpokenNormalized.shift();
     }
-    this.fx.playCommsClick(true);
+
+    const ttsAbort = new AbortController();
+    this.activeTtsAbort = ttsAbort;
 
     try {
-      const mp3Bytes = await this.azure.synthesizeSpeech(text, this.voiceName, urgency);
-      if (myGen !== this.speechGeneration || !this.enabled) return;
+      const mp3Bytes = await this.azure.synthesizeSpeech(
+        text,
+        this.voiceName,
+        urgency,
+        ttsAbort.signal
+      );
+      if (myGen !== this.speechGeneration || !this.enabled || ttsAbort.signal.aborted) return;
 
       const blob = new Blob([mp3Bytes], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
+      if (this.currentAudioUrl) {
+        URL.revokeObjectURL(this.currentAudioUrl);
+      }
       this.currentAudioUrl = url;
 
       if (!this.player) {
@@ -323,9 +359,12 @@ export class VoiceService {
           }
           audio.onended = null;
           audio.onerror = null;
+          if (this.currentAudioUrl === url) {
+            URL.revokeObjectURL(url);
+            this.currentAudioUrl = null;
+          }
           if (myGen === this.speechGeneration) {
             this.setSpeaking(false);
-            this.fx.playCommsClick(false);
           }
           resolve();
         };
@@ -336,21 +375,25 @@ export class VoiceService {
       });
       return;
     } catch {
-      if (myGen !== this.speechGeneration || !this.enabled) return;
+      if (myGen !== this.speechGeneration || !this.enabled || ttsAbort.signal.aborted) return;
+    } finally {
+      if (this.activeTtsAbort === ttsAbort) {
+        this.activeTtsAbort = null;
+      }
     }
 
-    // Fallback to browser Web Speech Synthesis if Azure TTS proxy unreachable
+    // Fallback to browser Web Speech Synthesis only if Azure TTS genuinely failed (not aborted)
     if ("speechSynthesis" in window) {
       const utter = new SpeechSynthesisUtterance(text);
       utter.rate =
         urgency === "emergency"
-          ? 1.14
+          ? 1.12
           : urgency === "caution"
-            ? 1.06
+            ? 1.05
             : urgency === "advisory"
               ? 1.02
               : 0.98;
-      utter.pitch = this.gender === "male" ? 0.94 : 1.08;
+      utter.pitch = this.gender === "male" ? 0.94 : 1.06;
       const voices = window.speechSynthesis.getVoices();
       const preferred = voices.find((v) => v.lang.startsWith("en"));
       if (preferred) utter.voice = preferred;
@@ -365,7 +408,6 @@ export class VoiceService {
           }
           if (myGen === this.speechGeneration) {
             this.setSpeaking(false);
-            this.fx.playCommsClick(false);
           }
           resolve();
         };
@@ -415,7 +457,7 @@ export class VoiceService {
     this.micCallbacks = callbacks;
     this.activeRecCtor = Ctor;
     this.keepListening = true;
-    void this.fx.startMicMeter();
+    this.consecutiveQuickEnds = 0;
     this.micCallbacks?.onStateChange(true);
     if (!this.isTxActive && this.pendingSpeechCount === 0) {
       this.spawnRecognitionInstance(Ctor);
@@ -449,9 +491,11 @@ export class VoiceService {
     rec.interimResults = true;
     this.activeRecognition = rec;
 
+    const startedAtMs = Date.now();
     let lastFinalIdx = -1;
 
     rec.onresult = (ev) => {
+      this.consecutiveQuickEnds = 0;
       // Strictly ignore speaker playback / cooldown windows so AI NEVER hears or interrupts itself
       if (
         !this.keepListening ||
@@ -488,8 +532,9 @@ export class VoiceService {
     rec.onerror = (ev) => {
       if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
         this.keepListening = false;
-        this.fx.stopMicMeter();
         this.micCallbacks?.onStateChange(false, "Microphone permission denied");
+      } else if (ev.error === "audio-capture") {
+        this.consecutiveQuickEnds += 2;
       }
     };
 
@@ -503,9 +548,24 @@ export class VoiceService {
       }
       // During AI transmission, resume is handled after TX cooldown instead of spawning mid-speech
       if (!this.isTxActive && this.pendingSpeechCount === 0) {
+        const elapsed = Date.now() - startedAtMs;
+        if (elapsed < 800) {
+          this.consecutiveQuickEnds += 1;
+        } else {
+          this.consecutiveQuickEnds = 0;
+        }
+        if (this.consecutiveQuickEnds >= 6) {
+          this.keepListening = false;
+          this.micCallbacks?.onStateChange(false, "Mic paused — click Mic to resume");
+          return;
+        }
+        const backoffMs =
+          this.consecutiveQuickEnds > 0
+            ? Math.min(4000, 450 * 2 ** (this.consecutiveQuickEnds - 1))
+            : 300;
         this.restartTimer = setTimeout(() => {
           this.spawnRecognitionInstance(Ctor);
-        }, 250);
+        }, backoffMs);
       }
     };
 

@@ -59,13 +59,15 @@ export class AzureProxyClient {
 
   public async chatCompletion(
     messages: ChatMessage[],
-    tools: ChatToolSpec[]
+    tools: ChatToolSpec[],
+    signal?: AbortSignal
   ): Promise<{
     message: ChatMessage;
   }> {
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({
         messages,
         tools,
@@ -91,11 +93,13 @@ export class AzureProxyClient {
   public async synthesizeSpeech(
     text: string,
     voice: string,
-    urgency: "nominal" | "advisory" | "caution" | "emergency" = "nominal"
+    urgency: "nominal" | "advisory" | "caution" | "emergency" = "nominal",
+    signal?: AbortSignal
   ): Promise<ArrayBuffer> {
     const res = await fetch(`${this.baseUrl}/api/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({ text, voice, urgency }),
     });
     if (!res.ok) {

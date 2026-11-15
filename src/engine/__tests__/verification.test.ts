@@ -391,8 +391,8 @@ describe("ARASAKA Engine & Simulation Verification (V-01 .. V-10)", () => {
     expect(radReply.toLowerCase()).not.toContain("you have");
 
     const boneReply = await controller.ask("What about bone density and immune index?");
-    expect(boneReply).toMatch(/estimated lumbar BMD/i);
-    expect(boneReply).toMatch(/DXA is record/i);
+    expect(boneReply).toMatch(/estimated lumbar bone density/i);
+    expect(boneReply).toMatch(/modeled estimate/i);
 
     // V-12: Slow modelled indices never exposed on visor gauges (SIM-HUD-001)
     expect(live.indicators.bone_loss_lumbar.visorVisible).toBe(false);

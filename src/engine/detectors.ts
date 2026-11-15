@@ -78,13 +78,13 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
       detectorId: "rad_spe_rate",
       class: 2,
       area: "radiation",
-      title: "SOLAR PARTICLE EVENT",
-      whyLine: `Dose rate ${doseRate.value.toFixed(2)} mSv/d (${mult}× baseline)`,
+      title: "Solar Radiation Surge",
+      whyLine: `Radiation ${doseRate.value.toFixed(1)} mSv/day (${mult}x normal)`,
       evidence: ev,
-      explanation: `Measured radiation dose rate is ${doseRate.value.toFixed(2)} mSv/day (${mult}× Mars surface baseline). This is consistent with a solar particle event; cumulative event dose is tracked against the 250 mSv design reference.`,
+      explanation: `Measured radiation is ${doseRate.value.toFixed(2)} mSv/day (${mult}x the normal Mars surface rate), which points to a solar flare event.`,
       suggestedActions: [
-        "Terminate EVA and move to shielded shelter immediately",
-        "Track cumulative dose against 250 mSv SPE reference and 600 mSv career limit",
+        "Stop outside work and move into shelter right away",
+        "Stay shielded until radiation levels return to normal",
       ],
       protocolId: "shelter",
       timeToEffectSec: 120,
@@ -98,8 +98,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "rad_career_limit",
         class: 2,
         area: "radiation",
-        title: "CAREER DOSE NEAR LIMIT",
-        whyLine: `Career dose ${careerPct.toFixed(1)}% of 600 mSv (${doseCum.value.toFixed(1)} mSv)`,
+        title: "Career Radiation Near Limit",
+        whyLine: `Career dose at ${careerPct.toFixed(0)}% of 600 mSv limit`,
         evidence: [
           {
             indicator: "dose_cumulative",
@@ -110,8 +110,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: doseCum.t,
           },
         ],
-        explanation: `Estimated cumulative career dose has reached ${doseCum.value.toFixed(1)} mSv (${careerPct.toFixed(1)}% of the 600 mSv NASA-STD-3001 limit). Advise contacting the flight surgeon (expected reply delay ~${delayMin} min).`,
-        suggestedActions: ["Restrict external EVA exposure", "Contact crew medical officer / flight surgeon"],
+        explanation: `Estimated total radiation is ${doseCum.value.toFixed(1)} mSv (${careerPct.toFixed(1)}% of the 600 mSv career limit). Limit outside walks and check in with the medical team (Earth reply takes about ${delayMin} min).`,
+        suggestedActions: ["Limit outside exposure", "Check in with the medical team"],
         escalateToMedical: true,
         timeToEffectSec: 3600,
       });
@@ -120,8 +120,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "rad_career_limit",
         class: 3,
         area: "radiation",
-        title: "CAREER DOSE ELEVATED",
-        whyLine: `Career dose ${careerPct.toFixed(1)}% of 600 mSv (${doseCum.value.toFixed(1)} mSv)`,
+        title: "Career Radiation Watch",
+        whyLine: `Career dose at ${careerPct.toFixed(0)}% of 600 mSv limit`,
         evidence: [
           {
             indicator: "dose_cumulative",
@@ -132,8 +132,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: doseCum.t,
           },
         ],
-        explanation: `Estimated cumulative dose is ${doseCum.value.toFixed(1)} mSv (${careerPct.toFixed(1)}% of 600 mSv career limit). Review remaining EVA budget against mission plan.`,
-        suggestedActions: ["Compare exposure budget to remaining mission plan"],
+        explanation: `Estimated total radiation has reached ${doseCum.value.toFixed(1)} mSv (${careerPct.toFixed(1)}% of the 600 mSv limit). Plan remaining outside walks carefully.`,
+        suggestedActions: ["Review remaining exposure budget for the mission"],
         timeToEffectSec: 86400,
       });
     }
@@ -173,11 +173,11 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "env_ppco2_1h",
         class: 2,
         area: "environment",
-        title: "HIGH CO₂ (1-HR LIMIT)",
-        whyLine: `1h avg ppCO₂ ${ppco2OneHourMean.toFixed(2)} mmHg (>= 3.0 mmHg)`,
+        title: "High CO2 Level",
+        whyLine: `1-hour CO2 average ${ppco2OneHourMean.toFixed(2)} mmHg (limit 3.0)`,
         evidence: ev,
-        explanation: `One-hour average ppCO₂ reached ${ppco2OneHourMean.toFixed(2)} mmHg, exceeding the 3.0 mmHg NASA-STD-3001 reference, with supporting cognitive slowing.`,
-        suggestedActions: ["Run Air Check protocol", "Verify CO₂ scrubber and move to ventilated module"],
+        explanation: `One-hour average carbon dioxide reached ${ppco2OneHourMean.toFixed(2)} mmHg, above the 3.0 mmHg limit, which can slow thinking and reaction time.`,
+        suggestedActions: ["Check CO2 scrubber and air flow", "Switch to fresh air or backup loop"],
         protocolId: "air_check",
         timeToEffectSec: 180,
       });
@@ -206,11 +206,11 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "env_ppco2_1h",
         class: 3,
         area: "environment",
-        title: "RISING CO₂ LEVEL",
-        whyLine: `1h avg ppCO₂ ${ppco2OneHourMean.toFixed(2)} mmHg (80% limit)`,
+        title: "Carbon Dioxide Rising",
+        whyLine: `1-hour CO2 average ${ppco2OneHourMean.toFixed(2)} mmHg (nearing 3.0 limit)`,
         evidence: ev,
-        explanation: `One-hour average ppCO₂ is ${ppco2OneHourMean.toFixed(2)} mmHg (above 80% of the 3.0 mmHg limit) and rising.`,
-        suggestedActions: ["Inspect scrubber and compartment airflow"],
+        explanation: `One-hour average carbon dioxide is ${ppco2OneHourMean.toFixed(2)} mmHg and climbing toward the 3.0 mmHg safety limit.`,
+        suggestedActions: ["Check the air scrubber and fan flow"],
         protocolId: "air_check",
         timeToEffectSec: 600,
       });
@@ -223,8 +223,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "env_pio2_low",
         class: 1,
         area: "environment",
-        title: "SEVERE HYPOXIA RISK",
-        whyLine: `PIO₂ ${pio2.value.toFixed(0)} mmHg (< 110 mmHg)`,
+        title: "Critically Low Oxygen",
+        whyLine: `Oxygen at ${pio2.value.toFixed(0)} mmHg (below 110 safe floor)`,
         evidence: [
           {
             indicator: "pio2",
@@ -235,8 +235,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: pio2.t,
           },
         ],
-        explanation: `Measured PIO₂ dropped to ${pio2.value.toFixed(0)} mmHg, indicating risk of acute hypoxia.`,
-        suggestedActions: ["Switch to secondary O₂ supply immediately", "Abort task and move to safe atmosphere"],
+        explanation: `Measured breathing oxygen dropped to ${pio2.value.toFixed(0)} mmHg, indicating serious risk of low oxygen.`,
+        suggestedActions: ["Switch to backup oxygen right away", "Stop work and move to safe air"],
         protocolId: "air_check",
         timeToEffectSec: 30,
       });
@@ -245,8 +245,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "env_pio2_low",
         class: 2,
         area: "environment",
-        title: "LOW OXYGEN (PIO₂)",
-        whyLine: `PIO₂ ${pio2.value.toFixed(0)} mmHg (< 127 mmHg hypoxia floor)`,
+        title: "Low Oxygen",
+        whyLine: `Oxygen at ${pio2.value.toFixed(0)} mmHg (below 127 floor)`,
         evidence: [
           {
             indicator: "pio2",
@@ -257,8 +257,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: pio2.t,
           },
         ],
-        explanation: `Measured PIO₂ is ${pio2.value.toFixed(0)} mmHg, below the 127 mmHg mild-hypoxia lower limit. Immediate O₂ supply check required.`,
-        suggestedActions: ["Check O₂ regulator/supply", "Move to safe pressurized location and recheck"],
+        explanation: `Measured oxygen is ${pio2.value.toFixed(0)} mmHg, below the 127 mmHg safety floor. Check your oxygen valve right away.`,
+        suggestedActions: ["Check oxygen regulator and valve", "Move to safe air and recheck"],
         protocolId: "air_check",
         timeToEffectSec: 90,
       });
@@ -267,8 +267,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "env_pio2_low",
         class: 3,
         area: "environment",
-        title: "PIO₂ BELOW NORMOXIA",
-        whyLine: `PIO₂ ${pio2.value.toFixed(0)} mmHg (< 145 mmHg target)`,
+        title: "Oxygen Dropping",
+        whyLine: `Oxygen at ${pio2.value.toFixed(0)} mmHg (normal 145 to 155)`,
         evidence: [
           {
             indicator: "pio2",
@@ -279,8 +279,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: pio2.t,
           },
         ],
-        explanation: `Measured PIO₂ is ${pio2.value.toFixed(0)} mmHg, below the 145–155 mmHg normoxia target.`,
-        suggestedActions: ["Verify O₂ flow and pressure"],
+        explanation: `Measured oxygen is ${pio2.value.toFixed(0)} mmHg, slightly below the 145 to 155 mmHg normal range.`,
+        suggestedActions: ["Check oxygen flow and tank pressure"],
         protocolId: "air_check",
         timeToEffectSec: 300,
       });
@@ -297,8 +297,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "env_pressure_bounds",
         class: activePress.value < minP - 4 ? 1 : 2,
         area: "environment",
-        title: isEva ? "SUIT PRESSURE OUT OF BOUNDS" : "CABIN PRESSURE OUT OF BOUNDS",
-        whyLine: `${isEva ? "Suit" : "Cabin"} pressure ${activePress.value.toFixed(1)} kPa (limit ${minP}-${maxP})`,
+        title: isEva ? "Suit Pressure Leak" : "Cabin Pressure Out of Range",
+        whyLine: `${isEva ? "Suit" : "Cabin"} pressure ${activePress.value.toFixed(1)} kPa (safe ${minP} to ${maxP})`,
         evidence: [
           {
             indicator: activePress.id,
@@ -309,8 +309,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: activePress.t,
           },
         ],
-        explanation: `Measured ${isEva ? "suit" : "cabin"} pressure is ${activePress.value.toFixed(1)} kPa, outside the ${minP}–${maxP} kPa safe window.`,
-        suggestedActions: ["Verify suit/habitat seal and pressure regulator"],
+        explanation: `Measured ${isEva ? "suit" : "cabin"} pressure is ${activePress.value.toFixed(1)} kPa, outside the ${minP} to ${maxP} kPa safe range.`,
+        suggestedActions: ["Check suit seals, gloves, neck ring, and pressure valve"],
         protocolId: "air_check",
         timeToEffectSec: 60,
       });
@@ -364,17 +364,17 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "cv_context_hr",
         class: 3,
         area: "cardiovascular",
-        title: act === "eva" ? "EVA EXERTION STRAIN" : "ELEVATED HEART RATE FOR CONTEXT",
-        whyLine: `HR ${Math.round(hr.value)} bpm > ${hrCfg.value} bpm (${act})${hrvLow ? `, HRV ${Math.round(hrv!.value)} ms` : ""}`,
+        title: act === "eva" ? "High Heart Rate on Walk" : "Unexpected High Heart Rate",
+        whyLine: `Heart rate ${Math.round(hr.value)} bpm (limit ${hrCfg.value} during ${act})`,
         evidence: ev,
         explanation:
           act === "eva"
-            ? `Heart rate (${Math.round(hr.value)} bpm) exceeds the ${hrCfg.value} bpm EVA limit with reduced HRV recovery. Slow down and rest for two minutes.`
-            : `Heart rate (${Math.round(hr.value)} bpm) is elevated above the ${hrCfg.value} bpm limit for ${act} context.`,
+            ? `Heart rate (${Math.round(hr.value)} bpm) is above the ${hrCfg.value} bpm limit for a spacewalk. Slow down and rest for two minutes.`
+            : `Heart rate (${Math.round(hr.value)} bpm) is above the ${hrCfg.value} bpm limit expected while resting inside.`,
         suggestedActions:
           act === "eva"
-            ? ["Pause EVA workload and rest 2 minutes", "Hydrate and monitor HR recovery"]
-            : ["Rest and recheck heart rate and blood pressure"],
+            ? ["Pause work and rest for two minutes", "Drink water and watch heart rate settle"]
+            : ["Rest quietly and recheck heart rate"],
         protocolId: "exertion_recovery",
         timeToEffectSec: 240,
       });
@@ -386,8 +386,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
       detectorId: "cv_orthostatic",
       class: 3,
       area: "cardiovascular",
-      title: "ORTHOSTATIC PRESSURE DROP",
-      whyLine: `Standing SBP drop ${Math.round(ortho.value)} mmHg (>= 20 mmHg)`,
+      title: "Standing Blood Pressure Drop",
+      whyLine: `Blood pressure dropped ${Math.round(ortho.value)} mmHg on standing`,
       evidence: [
         {
           indicator: "orthostatic_drop",
@@ -398,8 +398,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
           t: ortho.t,
         },
       ],
-      explanation: `Systolic pressure dropped ${Math.round(ortho.value)} mmHg on standing, consistent with orthostatic intolerance risk. Contact the flight surgeon (reply delay ~${delayMin} min) if symptoms persist.`,
-      suggestedActions: ["Sit or lie down immediately", "Drink fluids and recheck after 5 minutes"],
+      explanation: `Blood pressure dropped ${Math.round(ortho.value)} mmHg on standing, which points to risk of dizziness or fainting. Sit or lie down, and message the medical team (Earth reply takes about ${delayMin} min) if symptoms stay.`,
+      suggestedActions: ["Sit or lie down right away", "Drink fluids and recheck after 5 minutes"],
       protocolId: "orthostatic_response",
       escalateToMedical: true,
       timeToEffectSec: 180,
@@ -421,8 +421,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "sleep_7night_debt",
         class: 3,
         area: "sleep_behaviour",
-        title: "SLEEP DEBT TREND",
-        whyLine: `7-night sleep avg ${mean7.toFixed(2)}h (${shortfall.toFixed(2)}h below baseline)`,
+        title: "Sleep Loss Over Past Week",
+        whyLine: `Averaging ${mean7.toFixed(1)} hrs sleep (${shortfall.toFixed(1)} hrs short)`,
         evidence: [
           {
             indicator: "sleep_hours",
@@ -441,8 +441,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t: rt?.t ?? t,
           },
         ],
-        explanation: `Your 7-night sleep mean has fallen to ${mean7.toFixed(2)} hours/night (${shortfall.toFixed(2)} h under your ${store.profile.usualSleepHours.toFixed(1)} h baseline), contributing to slower reaction time.`,
-        suggestedActions: ["Start Sleep Reset protocol", "Protect 8 h sleep block and dim cabin lighting"],
+        explanation: `Your 7-night sleep average fell to ${mean7.toFixed(1)} hours (${shortfall.toFixed(1)} hours under your ${store.profile.usualSleepHours.toFixed(1)} hour normal baseline), slowing reaction speed.`,
+        suggestedActions: ["Protect an 8 hour sleep block tonight", "Dim habitat lights before bed"],
         protocolId: "sleep_reset",
         timeToEffectSec: 43200,
       });
@@ -457,8 +457,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
         detectorId: "bone_missed_exercise",
         class: 3,
         area: "bone",
-        title: "MISSED RESISTIVE EXERCISE",
-        whyLine: `0 resistive sessions in 14 days (est. lumbar BMD ${lumbar.toFixed(2)}%)`,
+        title: "Missed Strength Workouts",
+        whyLine: `0 workouts in 14 days (est. spine density ${lumbar.toFixed(1)}%)`,
         evidence: [
           {
             indicator: "exercise_sessions",
@@ -477,8 +477,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
             t,
           },
         ],
-        explanation: `No resistive exercise sessions were logged over the past 14 days, reducing bone protection to zero (estimated lumbar BMD ${lumbar.toFixed(2)}% of preflight; DXA remains the measurement of record).`,
-        suggestedActions: ["Schedule resistive countermeasure session"],
+        explanation: `No strength workouts were logged in 14 days, removing bone protection (estimated lumbar BMD is ${lumbar.toFixed(2)}% of preflight; DXA scans remain the measurement of record).`,
+        suggestedActions: ["Complete a strength workout session"],
         protocolId: "resistive_exercise",
         timeToEffectSec: 86400 * 7,
       });
@@ -490,8 +490,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
       detectorId: "immune_composite",
       class: 3,
       area: "immune",
-      title: "IMMUNE STRESS INDEX",
-      whyLine: `Demonstration immune_index ${immune.value.toFixed(0)}/100 (<= 70)`,
+      title: "Lower Immune Resilience",
+      whyLine: `Immune index ${immune.value.toFixed(0)}/100 (watch at 70)`,
       evidence: [
         {
           indicator: "immune_index",
@@ -502,8 +502,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
           t: immune.t,
         },
       ],
-      explanation: `The demonstration immune index dropped to ${immune.value.toFixed(0)}/100 due to combined sleep debt, stress/cortisol trend, and cumulative dose—a pattern associated with increased latent herpesvirus shedding (e.g., VZV DNA detected in 15 of 23 ISS crewmembers in [R8], mostly asymptomatic).`,
-      suggestedActions: ["Prioritize rest, sleep recovery, and symptom monitoring"],
+      explanation: `The estimated immune score dropped to ${immune.value.toFixed(0)}/100 from combined sleep loss, stress, and radiation. Similar patterns on ISS flights have been linked to mild latent viral shedding [R8].`,
+      suggestedActions: ["Prioritize rest, full sleep, and symptom checks"],
       protocolId: "sleep_reset",
       timeToEffectSec: 86400,
     });
@@ -514,8 +514,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
       detectorId: "behaviour_isolation_stress",
       class: 3,
       area: "sleep_behaviour",
-      title: "ELEVATED ISOLATION STRESS",
-      whyLine: `Self-reported stress_score ${Math.round(stress.value)}/100 (>= 68)`,
+      title: "High Stress Score",
+      whyLine: `Reported stress at ${Math.round(stress.value)}/100 (watch above 68)`,
       evidence: [
         {
           indicator: "stress_score",
@@ -526,8 +526,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
           t: stress.t,
         },
       ],
-      explanation: `Self-reported stress reached ${Math.round(stress.value)}/100. Consider paced breathing and scheduling a check-in with crew or Earth (expected reply delay ~${delayMin} min).`,
-      suggestedActions: ["Start Calm Breathing protocol", "Check in with crew or flight surgeon"],
+      explanation: `Your stress score reached ${Math.round(stress.value)}/100. Take a short calm breathing break and consider messaging Earth or crewmates (Earth reply takes about ${delayMin} min).`,
+      suggestedActions: ["Start a calm breathing break", "Check in with crew or family"],
       protocolId: "calm_breathing",
       timeToEffectSec: 21600,
     });
@@ -539,8 +539,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
       detectorId: "vision_sans",
       class: 3,
       area: "vision",
-      title: "VISION / SANS SYMPTOM",
-      whyLine: `Self-reported blurred vision (SANS demo index ${sansVal.toFixed(0)}/100)`,
+      title: "Blurry Near Vision",
+      whyLine: `Blurry near vision reported (risk score ${sansVal.toFixed(0)}/100)`,
       evidence: [
         {
           indicator: "vision_symptom",
@@ -551,8 +551,8 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
           t: visionSym.t,
         },
       ],
-      explanation: `Blurred near vision logged (SANS demonstration index ${sansVal.toFixed(0)}/100). About 66% of long-duration ISS astronauts show early SANS signs and 16–19% show clinically relevant optic disc edema [R9, R19]. Advise contacting the flight surgeon (expected reply delay ~${delayMin} min).`,
-      suggestedActions: ["Contact crew medical officer / flight surgeon", "Perform visual acuity & Amsler grid check"],
+      explanation: `Blurry near vision was logged (fluid-shift vision risk score ${sansVal.toFixed(0)}/100). Fluid shifts in low gravity can change eye shape over months [R9, R19]. Send an update to the medical team (reply takes about ${delayMin} min).`,
+      suggestedActions: ["Message the medical team", "Run a simple eye chart check"],
       escalateToMedical: true,
       timeToEffectSec: 43200,
     });
@@ -569,16 +569,16 @@ export function evaluateDetectorsAndAlerts(store: EngineStore, t: number): void 
     const primaryChild = [...candidates].sort((a, b) =>
       a.class !== b.class ? a.class - b.class : a.timeToEffectSec - b.timeToEffectSec
     )[0];
-    const areaList = distinctAreas.map((a) => a.replace("_", " ")).join(" + ");
+    const areaList = distinctAreas.map((a) => a.replace("_", " ")).join(", ");
 
     candidates.push({
       detectorId: "cascade_coupled",
       class: topClass,
       area: primaryChild.area,
-      title: "COUPLED HAZARD CASCADE",
-      whyLine: `${distinctAreas.length} linked hazards (${areaList}): ${primaryChild.whyLine}`,
+      title: "Multiple Problems Active",
+      whyLine: `${distinctAreas.length} alerts active (${primaryChild.title})`,
       evidence: mergedEvidence,
-      explanation: `Coupled multi-system event across ${areaList}. Highest immediate priority: ${primaryChild.explanation}`,
+      explanation: `Multiple alerts active at the same time (${areaList}). Top priority: ${primaryChild.explanation}`,
       suggestedActions: Array.from(new Set(candidates.flatMap((c) => c.suggestedActions))).slice(0, 4),
       protocolId: primaryChild.protocolId,
       escalateToMedical: candidates.some((c) => c.escalateToMedical),

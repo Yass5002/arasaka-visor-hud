@@ -429,7 +429,7 @@ export class HudCanvasRenderer {
       ctx.textAlign = "right";
       ctx.fillStyle = "#ffb84d";
       ctx.font = `700 ${Math.round(H * 0.0125)}px "DM Mono", ui-monospace, monospace`;
-      ctx.fillText(`+${queuedCount} QUEUED`, x + w * 0.955, y + h * 0.23);
+      ctx.fillText(`+${queuedCount} MORE`, x + w * 0.955, y + h * 0.23);
       ctx.textAlign = "left";
     }
 
@@ -437,7 +437,7 @@ export class HudCanvasRenderer {
     ctx.fillStyle = "#ffffff";
     ctx.font = `600 ${Math.round(H * 0.014)}px "Public Sans", sans-serif`;
     const whyText = escalated
-      ? "No crew confirmation >75 s · Telemetry packet queued (~12 min delay)"
+      ? "No crew confirmation >75 s · Medical update sent (~12 min delay)"
       : this.truncateText(ctx, primary!.whyLine, w * 0.90);
     ctx.fillText(whyText, x + w * 0.045, y + h * 0.53);
 

@@ -21,7 +21,7 @@ import { MissionSimulator, type ClockSpeed } from "./sim/simulator";
 function formatClock(day: number, todSec: number): string {
   const hh = Math.floor(todSec / 3600) % 24;
   const mm = Math.floor(todSec / 60) % 60;
-  return `Sol ${day} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  return `Day ${day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
 export function App() {
@@ -65,8 +65,8 @@ export function App() {
     {
       id: "welcome-0",
       speaker: "ASSISTANT",
-      text: "Suit systems nominal, Sir. Standing by.",
-      missionClock: "Sol 1 08:00",
+      text: "All suit systems look good, Sir.",
+      missionClock: "Day 1 · 08:00",
     },
   ]);
 
@@ -249,7 +249,10 @@ export function App() {
         onStopSpeaking={() => voice.stopSpeech()}
         onConfirmStep={() => assistant.confirmCurrentProtocolStep()}
         onAcknowledgeAlert={(id) => engine.acknowledgeAlert(id)}
-        onSilenceAlarms={() => engine.silenceAllAlerts()}
+        onSilenceAlarms={() => {
+          voice.stopSpeech();
+          engine.silenceAllAlerts();
+        }}
         onOpenSimulation={() => setSimulationOpen(true)}
         onOpenTrends={() => setTrendsOpen(true)}
         onOpenSources={() => setSourcesOpen(true)}
@@ -285,7 +288,7 @@ export function App() {
         onTestVoice={() => {
           voice.unlockAudio();
           assistant.setVoiceConnected(true);
-          void voice.speak("Suit radio check nominal, Sir.", "nominal", true);
+          void voice.speak("Suit voice check sounds clear, Sir.", "nominal", true);
         }}
         radioFilterEnabled={radioFilterEnabled}
         onToggleRadioFilter={(enabled) => {

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { INDICATOR_META } from "../engine/config";
-import type { ActivityType, HealthArea, IndicatorId, LiveState } from "../engine/types";
-import { PRESET_CATALOGUE, type PresetDefinition } from "../sim/presets";
+import type { ActivityType, IndicatorId, LiveState } from "../engine/types";
+import { PRESET_CATALOGUE, type PresetDefinition, type PresetGroup } from "../sim/presets";
 import type { ClockSpeed, MissionSimulator } from "../sim/simulator";
 
 export interface SimulationPanelProps {
@@ -16,18 +16,27 @@ export interface SimulationPanelProps {
   onTriggerEvent?: (presetId: string) => void;
 }
 
-const AREA_LABELS: Record<HealthArea, string> = {
-  radiation: "Radiation",
-  environment: "Environment",
-  cardiovascular: "Cardiovascular",
-  sleep_behaviour: "Sleep & Behaviour",
-  bone: "Bone Density",
-  immune: "Immune Index",
-  vision: "Vision / SANS",
+const GROUP_LABELS: Record<PresetGroup, string> = {
+  fast_event: "Emergency",
+  slow_drift: "Gradual",
+  smart_case: "Combined",
+  custom: "Saved",
 };
 
-const ACTIVITY_OPTIONS: ActivityType[] = ["eva", "cabin", "exercise", "sleep", "rest"];
-const SPEED_OPTIONS: ClockSpeed[] = [1, 60, 3600, 86400];
+const ACTIVITY_OPTIONS: Array<{ id: ActivityType; label: string }> = [
+  { id: "eva", label: "Outside EVA" },
+  { id: "cabin", label: "Inside Habitat" },
+  { id: "exercise", label: "Workout" },
+  { id: "rest", label: "Rest" },
+  { id: "sleep", label: "Sleep" },
+];
+
+const SPEED_OPTIONS: Array<{ speed: ClockSpeed; label: string }> = [
+  { speed: 1, label: "Real time" },
+  { speed: 60, label: "1 min/s" },
+  { speed: 3600, label: "1 hr/s" },
+  { speed: 86400, label: "1 day/s" },
+];
 
 export const SimulationPanel: React.FC<SimulationPanelProps> = ({
   open,
@@ -40,9 +49,8 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
   onSetSpeed,
   onTriggerEvent,
 }) => {
-  const [selectedArea, setSelectedArea] = useState<HealthArea>("environment");
   const [sliderDrafts, setSliderDrafts] = useState<Partial<Record<IndicatorId, number>>>({});
-  const [customName, setCustomName] = useState("My Custom Scenario");
+  const [customName, setCustomName] = useState("");
   const debounceRef = useRef<Partial<Record<IndicatorId, ReturnType<typeof setTimeout>>>>({});
 
   useEffect(() => {
@@ -57,9 +65,7 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
   useEffect(() => {
     const timers = debounceRef.current;
     return () => {
-      for (const k of Object.keys(timers) as IndicatorId[]) {
-        if (timers[k]) clearTimeout(timers[k]);
-      }
+      Object.values(timers).forEach((tm) => tm && clearTimeout(tm));
     };
   }, []);
 
@@ -80,27 +86,24 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
         delete copy[id];
         return copy;
       });
-    }, 500);
+    }, 60);
   };
 
   const renderScenarioCard = (p: PresetDefinition) => {
     const isActive = activePresetIds.includes(p.id);
     return (
-      <div key={p.id} className="preset-row">
-        <div className="preset-row-head">
-          <div>
-            <span className="preset-code">{p.code}</span>{" "}
-            <strong style={{ fontSize: 12.5 }}>{p.name}</strong>
+      <div key={p.id} className={`hds-scenario-card ${isActive ? "active" : ""}`}>
+        <div className="hds-scenario-info">
+          <div className="hds-scenario-head">
+            <strong>{p.name}</strong>
+            <span className="hds-pill">{GROUP_LABELS[p.group] ?? "Event"}</span>
           </div>
-          <span className="mono" style={{ fontSize: 10, color: "#aeb0b5" }}>
-            {p.scope === "eva_surface" ? "EVA" : "HAB/LONG"} · {p.basis}
-          </span>
+          <p className="hds-body-sm hds-muted">{p.summary}</p>
         </div>
-        <p style={{ fontSize: 11.5, color: "#cbd5e1", lineHeight: 1.35 }}>{p.summary}</p>
-        <div className="chip-row">
+        <div className="hds-scenario-actions">
           <button
             type="button"
-            className={`hds-btn ${isActive ? "hds-btn-primary" : ""}`}
+            className={`hds-btn hds-btn-sm ${isActive ? "active" : "hds-btn-primary"}`}
             onClick={() => {
               if (onTriggerEvent) {
                 onTriggerEvent(p.id);
@@ -109,17 +112,16 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
               }
             }}
           >
-            {isActive ? "Active · Re-trigger Event" : "Trigger Event"}
+            {isActive ? "Active" : "Trigger now"}
           </button>
-          {p.supportsScenarioStart && (
-            <button
-              type="button"
-              className="hds-btn"
-              onClick={() => simulator.firePreset(p.id, "scenario_start")}
-            >
-              Jump to Day {p.scenarioStartDays ?? 14}
-            </button>
-          )}
+          <button
+            type="button"
+            className="hds-btn hds-btn-sm"
+            onClick={() => simulator.firePreset(p.id, "scenario_start")}
+            title="Restart the simulation directly inside this scenario"
+          >
+            Start fresh
+          </button>
         </div>
       </div>
     );
@@ -128,229 +130,182 @@ export const SimulationPanel: React.FC<SimulationPanelProps> = ({
   const fastPresets = PRESET_CATALOGUE.filter((p) => p.group === "fast_event");
   const slowPresets = PRESET_CATALOGUE.filter((p) => p.group === "slow_drift");
   const smartPresets = PRESET_CATALOGUE.filter((p) => p.group === "smart_case");
-
-  const areaIndicators = (Object.keys(INDICATOR_META) as IndicatorId[])
-    .map((id) => INDICATOR_META[id])
-    .filter((m) => m.area === selectedArea);
+  const sliderSpecs = Object.values(INDICATOR_META);
 
   return (
     <div
-      className="overlay-backdrop"
-      role="presentation"
+      className="drawer-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Events and simulation controls"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <aside className="settings-drawer" aria-label="Mission Events and Simulation Studio">
-        <div className="drawer-header">
+      <div className="drawer-card">
+        <div className="modal-header">
           <div>
-            <div className="drawer-title">EVA SURFACE EVENTS &amp; SIMULATION</div>
-            <div className="mono" style={{ fontSize: 10.5, color: "#96c2ff" }}>
-              Outside-Cabin Mars Surface Scenarios · Clock · Sensor Sliders
-            </div>
+            <h2 className="modal-title">Events &amp; Controls</h2>
+            <p className="modal-subtitle">
+              Test emergency situations, change your activity, or fast-forward mission time.
+            </p>
           </div>
-          <button type="button" className="hds-btn" onClick={onClose}>
-            Close (Esc)
+          <button type="button" className="hds-btn hds-btn-sm" onClick={onClose}>
+            Close
           </button>
         </div>
 
-        <div className="drawer-body">
-          {/* Mission Clock & Time Travel */}
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Mission Clock &amp; Time Travel</span>
-              <span>
-                Sol {liveState.missionDay} / {liveState.missionLengthDays}
-              </span>
-            </div>
-
-            <div className="chip-row" style={{ marginBottom: 8 }}>
+        <div className="modal-body">
+          {/* Time & Playback */}
+          <section className="hds-section">
+            <div className="hds-section-row">
+              <h3 className="hds-section-title">Mission clock &amp; speed</h3>
               <button
                 type="button"
-                className={`hds-btn ${playing ? "hds-btn-primary" : ""}`}
+                className={`hds-btn hds-btn-sm ${playing ? "active" : "hds-btn-primary"}`}
                 onClick={onTogglePlay}
               >
-                {playing ? "Pause Clock" : "Play Clock"}
-              </button>
-              {SPEED_OPTIONS.map((spd) => (
-                <button
-                  key={spd}
-                  type="button"
-                  className={`chip-btn ${speed === spd ? "active" : ""}`}
-                  onClick={() => onSetSpeed(spd)}
-                >
-                  {spd}×
-                </button>
-              ))}
-            </div>
-
-            <div className="chip-row" style={{ marginBottom: 8 }}>
-              <button type="button" className="hds-btn" onClick={() => simulator.jumpForward(3600)}>
-                +1 Hour
-              </button>
-              <button type="button" className="hds-btn" onClick={() => simulator.jumpForward(86400)}>
-                +1 Day
-              </button>
-              <button
-                type="button"
-                className="hds-btn"
-                onClick={() => simulator.jumpForward(7 * 86400)}
-              >
-                +7 Days
-              </button>
-              <button
-                type="button"
-                className="hds-btn"
-                onClick={() => simulator.jumpForward(14 * 86400)}
-              >
-                +14 Days
+                {playing ? "Pause clock" : "Resume clock"}
               </button>
             </div>
 
             <div className="chip-row">
-              <button type="button" className="hds-btn" onClick={() => simulator.jumpBackward()}>
-                ← Back Snapshot
+              {SPEED_OPTIONS.map((opt) => (
+                <button
+                  key={opt.speed}
+                  type="button"
+                  className={`chip-btn ${speed === opt.speed ? "active" : ""}`}
+                  onClick={() => onSetSpeed(opt.speed)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="hds-action-wrap">
+              <button type="button" className="hds-btn hds-btn-sm" onClick={() => simulator.jumpForward(3600)}>
+                +1 hour
               </button>
-              <button type="button" className="hds-btn" onClick={() => simulator.clearPresets()}>
-                Clear Active Presets
+              <button type="button" className="hds-btn hds-btn-sm" onClick={() => simulator.jumpForward(86400)}>
+                +1 day
               </button>
-              <button
-                type="button"
-                className="hds-btn hds-btn-danger"
-                onClick={() => simulator.resetAll()}
-              >
-                Reset Mission
+              <button type="button" className="hds-btn hds-btn-sm" onClick={() => simulator.jumpForward(7 * 86400)}>
+                +7 days
+              </button>
+              <button type="button" className="hds-btn hds-btn-sm" onClick={() => simulator.jumpForward(14 * 86400)}>
+                +14 days
+              </button>
+              <button type="button" className="hds-btn hds-btn-sm" onClick={() => simulator.jumpBackward()}>
+                Step back
+              </button>
+              <button type="button" className="hds-btn hds-btn-sm" onClick={() => simulator.clearPresets()}>
+                Clear events
+              </button>
+              <button type="button" className="hds-btn hds-btn-sm hds-btn-warn" onClick={() => simulator.resetAll()}>
+                Reset all
               </button>
             </div>
           </section>
 
-          {/* Activity Context Selector */}
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Current Activity Context</span>
-              <span>{liveState.context.location.toUpperCase()}</span>
-            </div>
+          {/* Crew Activity */}
+          <section className="hds-section">
+            <h3 className="hds-section-title">Current astronaut activity</h3>
             <div className="chip-row">
               {ACTIVITY_OPTIONS.map((act) => (
                 <button
-                  key={act}
+                  key={act.id}
                   type="button"
-                  className={`chip-btn ${liveState.context.activity === act ? "active" : ""}`}
-                  onClick={() => simulator.setManualContext(act)}
+                  className={`chip-btn ${liveState.context.activity === act.id ? "active" : ""}`}
+                  onClick={() => simulator.setManualContext(act.id)}
                 >
-                  {act.toUpperCase()}
+                  {act.label}
                 </button>
               ))}
             </div>
           </section>
 
-          {/* Simulation Event Scenarios (Full ARASAKA-SIM-001 S-01..S-15 Suite) */}
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Emergency &amp; Acute Hazard Events</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {fastPresets.map(renderScenarioCard)}
-            </div>
+          {/* Scenarios */}
+          <section className="hds-section">
+            <h3 className="hds-section-title">Sudden emergencies</h3>
+            <p className="hds-body-sm hds-muted">
+              Click Trigger now to start an event while staying inside your current suit view, or stack multiple events together.
+            </p>
+            <div className="hds-scenario-list">{fastPresets.map(renderScenarioCard)}</div>
           </section>
 
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Long-Duration Drifts &amp; Deconditioning</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {slowPresets.map(renderScenarioCard)}
-            </div>
+          <section className="hds-section">
+            <h3 className="hds-section-title">Slow health changes</h3>
+            <div className="hds-scenario-list">{slowPresets.map(renderScenarioCard)}</div>
           </section>
 
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Multi-Hazard Cascades &amp; Context Guards</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {smartPresets.map(renderScenarioCard)}
-            </div>
+          <section className="hds-section">
+            <h3 className="hds-section-title">Multi-factor test cases</h3>
+            <div className="hds-scenario-list">{smartPresets.map(renderScenarioCard)}</div>
           </section>
 
-          {/* Custom Scenarios */}
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Custom Scenarios</span>
-            </div>
-            <div className="assistant-input-row" style={{ marginBottom: 8 }}>
-              <input
-                type="text"
-                className="hds-input"
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Custom scenario name..."
-              />
-              <button
-                type="button"
-                className="hds-btn hds-btn-primary"
-                onClick={() => {
-                  simulator.saveCustomPreset(customName);
-                  setCustomName("Saved Scenario");
-                }}
-              >
-                Save Current State
-              </button>
-            </div>
-            {customPresets.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {customPresets.map(renderScenarioCard)}
-              </div>
-            )}
-          </section>
+          {customPresets.length > 0 && (
+            <section className="hds-section">
+              <h3 className="hds-section-title">Saved custom states</h3>
+              <div className="hds-scenario-list">{customPresets.map(renderScenarioCard)}</div>
+            </section>
+          )}
 
-          {/* Direct Indicator Overrides */}
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Manual Indicator Sliders (500 ms debounce)</span>
-            </div>
-            <div className="chip-row" style={{ marginBottom: 8 }}>
-              {(Object.keys(AREA_LABELS) as HealthArea[]).map((area) => (
+          {/* Optional Fine Sensor Tuning */}
+          <details className="hds-details">
+            <summary className="hds-details-summary">
+              Advanced: Adjust individual sensor readings or save a snapshot
+            </summary>
+
+            <div className="hds-details-body">
+              <div className="hds-save-row">
+                <input
+                  type="text"
+                  className="hds-input"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Name for this snapshot..."
+                />
                 <button
-                  key={area}
                   type="button"
-                  className={`chip-btn ${selectedArea === area ? "active" : ""}`}
-                  onClick={() => setSelectedArea(area)}
+                  className="hds-btn hds-btn-sm"
+                  onClick={() => {
+                    if (!customName.trim()) return;
+                    simulator.saveCustomPreset(customName);
+                    setCustomName("");
+                  }}
                 >
-                  {AREA_LABELS[area]}
+                  Save state
                 </button>
-              ))}
-            </div>
+              </div>
 
-            {areaIndicators.map((meta) => {
-              const liveVal = liveState.indicators[meta.id]?.value ?? meta.defaultValue;
-              const displayedVal = sliderDrafts[meta.id] ?? liveVal;
-              return (
-                <div key={meta.id} className="slider-row">
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                    <span>
-                      {meta.label}{" "}
-                      <span className="mono" style={{ fontSize: 10, color: "#aeb0b5" }}>
-                        [{meta.basis}]
-                      </span>
-                    </span>
-                    <strong className="mono" style={{ color: "#02bfe7" }}>
-                      {displayedVal.toFixed(meta.decimals)} {meta.unit}
-                    </strong>
-                  </div>
-                  <input
-                    type="range"
-                    min={meta.sliderMin}
-                    max={meta.sliderMax}
-                    step={meta.sliderStep}
-                    value={Math.min(meta.sliderMax, Math.max(meta.sliderMin, displayedVal))}
-                    onChange={(e) => handleSliderChange(meta.id, Number(e.target.value))}
-                  />
-                </div>
-              );
-            })}
-          </section>
+              <div className="hds-sliders-list">
+                {sliderSpecs.map((meta) => {
+                  const displayedVal = sliderDrafts[meta.id] ?? liveState.indicators[meta.id].value;
+                  return (
+                    <div key={meta.id} className="hds-slider-row">
+                      <div className="hds-slider-head">
+                        <span>{meta.label}</span>
+                        <strong className="hds-num">
+                          {displayedVal.toFixed(meta.decimals)} {meta.unit}
+                        </strong>
+                      </div>
+                      <input
+                        type="range"
+                        className="hds-range"
+                        min={meta.sliderMin}
+                        max={meta.sliderMax}
+                        step={meta.sliderStep}
+                        value={Math.min(meta.sliderMax, Math.max(meta.sliderMin, displayedVal))}
+                        onChange={(e) => handleSliderChange(meta.id, Number(e.target.value))}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </details>
         </div>
-      </aside>
+      </div>
     </div>
   );
 };

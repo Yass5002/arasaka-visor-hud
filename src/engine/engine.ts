@@ -200,6 +200,7 @@ export class CrewHealthEngine {
       !this.store.activeProtocol.completed &&
       this.store.activeProtocol.autoTriggered &&
       this.store.activeProtocol.completedSteps.length === 0 &&
+      !this.store.activeProtocol.contingencyTitle &&
       !activeProtoIds.has(this.store.activeProtocol.id)
     ) {
       const next = this.store.pausedProtocols.shift() ?? null;
@@ -311,7 +312,9 @@ export class CrewHealthEngine {
 
   public completeProtocolStep(protocolId: ProtocolId, stepIndex: number): ActiveProtocolState | null {
     const active = this.store.activeProtocol;
-    if (!active || active.id !== protocolId) return null;
+    if (!active || active.id !== protocolId || active.completed || active.currentStepIndex !== stepIndex) {
+      return null;
+    }
     const def = PROTOCOLS[protocolId];
 
     if (!active.completedSteps.includes(stepIndex)) {
@@ -320,18 +323,18 @@ export class CrewHealthEngine {
     this.store.appendEvent(this.currentT, "step_completed", {
       protocolId,
       stepIndex,
-      instruction: def.steps[stepIndex]?.instruction,
+      instruction: active.currentStep.instruction || def.steps[stepIndex]?.instruction,
     });
 
     const nextIdx = stepIndex + 1;
-    if (nextIdx >= def.steps.length) {
+    if (nextIdx >= active.totalSteps || nextIdx >= def.steps.length) {
       active.completed = true;
       if (protocolId === "air_check") {
         // Flush stale pre-scrubber ppCO2 samples out of the 1-hr rolling average window
         this.store.rollingWindowFloorByIndicator.ppco2 = this.currentT;
       }
       // Run physical mitigation cleanly BEFORE updating alert resolution or notifying listeners
-      this.onStepMitigation?.(protocolId, stepIndex);
+      this.onStepMitigation?.(protocolId, Math.max(1, stepIndex));
 
       // Resolve any alerts bound to this finished protocol
       for (const alr of this.store.activeAlerts) {
@@ -346,12 +349,17 @@ export class CrewHealthEngine {
       }
       this.store.activeAlerts = this.store.activeAlerts.filter((a) => a.state !== "resolved");
 
-      // Automatically resume next valid paused protocol on the preemption stack if one exists
+      // Automatically resume next valid paused protocol or clear activeProtocol cleanly
       this.pruneResolvedAutoProtocols();
       const nextQueued = this.store.pausedProtocols.shift();
-      if (nextQueued) {
-        this.store.activeProtocol = nextQueued;
-      }
+      this.store.activeProtocol = nextQueued ?? null;
+    } else if (active.contingencyTitle) {
+      // Contingency Plan B/C resolves directly upon single crew confirmation
+      active.completed = true;
+      this.onStepMitigation?.(protocolId, Math.max(1, stepIndex));
+      this.pruneResolvedAutoProtocols();
+      const nextQueued = this.store.pausedProtocols.shift();
+      this.store.activeProtocol = nextQueued ?? null;
     } else {
       active.currentStepIndex = nextIdx;
       active.currentStep = def.steps[nextIdx];
@@ -406,8 +414,9 @@ export class CrewHealthEngine {
 
     const active = this.store.activeProtocol!;
     active.name = title.trim() || active.name;
-    active.contingencyTitle = title.trim() || "Plan B Adapted Guidance";
+    active.contingencyTitle = title.trim() || "Backup Plan";
     active.contingencyReason = reason?.trim();
+    active.totalSteps = active.currentStepIndex + 1;
     active.currentStep = {
       index: active.currentStepIndex,
       instruction: currentAction.trim(),

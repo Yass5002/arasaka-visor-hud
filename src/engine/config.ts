@@ -652,117 +652,117 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
 
 export const PROTOCOLS: Record<ProtocolId, { name: string; steps: ProtocolStep[] }> = {
   shelter: {
-    name: "Solar Particle Event Shelter Protocol",
+    name: "Solar Storm Shelter",
     steps: [
       {
         index: 0,
-        instruction: "Terminate EVA tasks immediately and head to the shielded habitat core.",
-        confirmationPrompt: "Confirm when you are inside the shielded shelter.",
+        instruction: "Stop outside work and head back inside the habitat shelter.",
+        confirmationPrompt: "Confirm when you are inside the shelter.",
       },
       {
         index: 1,
-        instruction: "Seal airlock, check storm shelter dosimeter readout, and log shelter entry.",
-        confirmationPrompt: "Confirm shelter seal and dosimeter reading.",
+        instruction: "Close the airlock and check your suit radiation reading.",
+        confirmationPrompt: "Confirm the airlock is sealed.",
       },
       {
         index: 2,
-        instruction: "Remain in shielded volume while cumulative SPE dose is tracked against 250 mSv design reference.",
-        confirmationPrompt: "Confirm once radiation dose rate returns to nominal baseline.",
+        instruction: "Stay inside the shelter until the storm passes.",
+        confirmationPrompt: "Confirm when radiation drops back to normal.",
       },
     ],
   },
   air_check: {
-    name: "Atmospheric Air Check Protocol",
+    name: "Suit Air and Pressure Check",
     steps: [
       {
         index: 0,
-        instruction: "Check CO₂ scrubber loop, ventilation fan flow, and suit/cabin O₂ supply valve.",
-        confirmationPrompt: "Confirm scrubber and O₂ supply check.",
+        instruction: "Check your suit seal, air scrubber, and main oxygen valve.",
+        confirmationPrompt: "Confirm when you have checked the valves and seals.",
       },
       {
         index: 1,
-        instruction: "Move to a well-ventilated compartment or switch to backup O₂ loop.",
-        confirmationPrompt: "Confirm transition to safe atmosphere.",
+        instruction: "Switch to backup oxygen or move to a safe pressurized room.",
+        confirmationPrompt: "Confirm you are on clean air.",
       },
       {
         index: 2,
-        instruction: "Recheck ppCO₂ and PIO₂ readings for stabilization within nominal bounds.",
-        confirmationPrompt: "Confirm readings stabilized.",
+        instruction: "Watch your air and pressure numbers until they stay steady.",
+        confirmationPrompt: "Confirm your air numbers are steady.",
       },
     ],
   },
   exertion_recovery: {
-    name: "EVA Exertion Recovery Protocol",
+    name: "Heart Rate Recovery",
     steps: [
       {
         index: 0,
-        instruction: "Pause physical workload, brace safely, and slow breathing for two minutes.",
-        confirmationPrompt: "Confirm two-minute rest completed.",
+        instruction: "Stop moving, find steady footing, and slow your breathing for two minutes.",
+        confirmationPrompt: "Confirm after resting for two minutes.",
       },
       {
         index: 1,
-        instruction: "Hydrate from in-suit drink bag and monitor heart rate recovery toward baseline.",
-        confirmationPrompt: "Confirm hydration and heart rate drop.",
+        instruction: "Sip water from your helmet drink tube and wait for your heart rate to settle.",
+        confirmationPrompt: "Confirm you have hydrated and feel steady.",
       },
     ],
   },
   orthostatic_response: {
-    name: "Orthostatic Response Protocol",
+    name: "Dizziness Recovery",
     steps: [
       {
         index: 0,
-        instruction: "Sit or lie down immediately to restore cerebral perfusion.",
-        confirmationPrompt: "Confirm seated or supine posture.",
+        instruction: "Sit or lie down right away so you do not faint.",
+        confirmationPrompt: "Confirm when you are sitting or lying down.",
       },
       {
         index: 1,
-        instruction: "Drink 300 mL electrolyte fluid and rest for 5 minutes before rechecking standing blood pressure.",
-        confirmationPrompt: "Confirm fluids taken and pressure rechecked.",
+        instruction: "Drink fluids with electrolytes, rest five minutes, then stand slowly.",
+        confirmationPrompt: "Confirm after drinking fluids and resting.",
       },
     ],
   },
   resistive_exercise: {
-    name: "Resistive Countermeasure Protocol",
+    name: "Strength Workout",
     steps: [
       {
         index: 0,
-        instruction: "Review ARED/resistive loading plan and confirm harness/joint warm-up.",
-        confirmationPrompt: "Confirm session start and form check.",
+        instruction: "Warm up your joints and set up the resistance harness.",
+        confirmationPrompt: "Confirm when you are ready to start.",
       },
       {
         index: 1,
-        instruction: "Complete scheduled sets and log resistive exercise completion.",
-        confirmationPrompt: "Confirm session completed.",
+        instruction: "Finish your strength sets to protect bone and muscle mass.",
+        confirmationPrompt: "Confirm when your workout is finished.",
       },
     ],
   },
   sleep_reset: {
-    name: "Circadian & Sleep Reset Protocol",
+    name: "Sleep Schedule Reset",
     steps: [
       {
         index: 0,
-        instruction: "Shift cabin lighting to warm dim spectrum 90 minutes before target sleep block.",
-        confirmationPrompt: "Confirm lighting and wind-down schedule set.",
+        instruction: "Dim bright lights 90 minutes before bed to help your body wind down.",
+        confirmationPrompt: "Confirm evening wind-down started.",
       },
       {
         index: 1,
-        instruction: "Protect an 8-hour sleep opportunity tonight and avoid caffeine after midday.",
-        confirmationPrompt: "Confirm sleep reset plan acknowledged.",
+        instruction: "Set aside an 8 hour sleep block tonight and skip late caffeine.",
+        confirmationPrompt: "Confirm your sleep plan is set.",
       },
     ],
   },
   calm_breathing: {
-    name: "Paced Calm Breathing Protocol",
+    name: "Calm Breathing Break",
     steps: [
       {
         index: 0,
-        instruction: "Follow 4-second inhale, 6-second exhale paced breathing for 3 minutes.",
-        confirmationPrompt: "Confirm breathing cycle completed.",
+        instruction: "Breathe in for 4 seconds and out for 6 seconds over three minutes.",
+        confirmationPrompt: "Confirm when you finish the breathing break.",
       },
       {
         index: 1,
-        instruction: "Consider scheduling a crew check-in or Earth message (12 min one-way delay).",
-        confirmationPrompt: "Confirm follow-up action.",
+        instruction: "Take a quiet break or send a message to crew or family back home.",
+        confirmationPrompt: "Confirm you have taken a break.",
       },
     ],
   },
@@ -785,31 +785,31 @@ export const MASTER_REFERENCES = [
   { id: "R14", citation: "NASA ExMC, Earth-Independent Medical Operations Concept of Operations, NTRS 20240001402 (2024)" },
   { id: "R15", citation: "NASA ASCEND, Communication Delays, Disruptions, and Blackouts for Crewed Mars Missions, NTRS 20220013418" },
   { id: "R16", citation: "NASA, EVA Gas Related Problems related to Spacesuits (Dec 2022), NTRS 20220019130" },
-  { id: "R17", citation: "NASA, About Intelligent and Adaptive Systems (Mars light-time delay, 3–22 min)" },
+  { id: "R17", citation: "NASA, About Intelligent and Adaptive Systems (Mars light-time delay, 3 to 22 min)" },
   { id: "R18", citation: "Simonsen L. et al., ASCEND draft on crew radiation exposure, NTRS 20250006168 (not peer reviewed)" },
-  { id: "R19", citation: "Ocular Health Study cohort report, PMC7118682 (optic disc edema in 16–19% of examined astronauts)" },
+  { id: "R19", citation: "Ocular Health Study cohort report, PMC7118682 (optic disc edema in 16 to 19% of examined astronauts)" },
 ] as const;
 
 export const TERRAIN_SOURCES = [
   {
     id: "mars",
-    label: "Mars — Jezero Crater (Perseverance)",
+    label: "Mars: Jezero Crater (Perseverance)",
     credit: "NASA/JPL-Caltech/ASU/MSSS",
-    licence: "Public Domain (U.S. Government Work; non-commercial/educational display, no NASA endorsement implied)",
+    licence: "Public Domain (U.S. Government Work, no NASA endorsement implied)",
     available: true,
   },
   {
     id: "moon",
-    label: "Moon — Artemis South Pole",
+    label: "Moon: Artemis South Pole",
     credit: "NASA / LRO / Artemis",
-    licence: "Assets pending",
+    licence: "Coming soon",
     available: false,
   },
   {
     id: "orbit",
-    label: "Deep Space Transit / Low Mars Orbit",
+    label: "Deep Space / Mars Orbit",
     credit: "NASA Earth Observatory / JSC",
-    licence: "Assets pending",
+    licence: "Coming soon",
     available: false,
   },
 ] as const;

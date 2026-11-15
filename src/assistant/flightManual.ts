@@ -1,29 +1,26 @@
 /**
- * Authoritative Operations Manual & NASA-STD-3001 Reference Knowledge Base
- * distilled directly from:
- * - ARASAKA-CONOPS-001 (Concept of Operations v0.2)
- * - ARASAKA-ENG-001 (Engine Specification v0.2)
- * - ARASAKA-SIM-001 (Simulation and Demonstration Plan v0.3)
+ * Operations Manual & NASA-STD-3001 Reference Knowledge Base
+ * Distilled from ARASAKA-CONOPS-001, ARASAKA-ENG-001, and ARASAKA-SIM-001.
  */
 
-export const MANUAL_CORE_BRIEF = `=== ARASAKA FLIGHT OPERATIONS & NASA-STD-3001 MANUAL (CORE) ===
+export const MANUAL_CORE_BRIEF = `=== FLIGHT OPERATIONS & NASA-STD-3001 MANUAL (CORE) ===
 MISSION PROFILE:
-- Long-duration Earth-independent Mars mission (surface EVA + habitat + transit; up to 1000 days).
-- Earth one-way light delay: 3 to 22 minutes (nominal demo: 12 min [R15, R17]); periodic blackouts occur. Zero emergency evacuation or sample return [R7, R8]. Crew health autonomy is paramount.
+- Mars surface mission with surface walks, habitat living, and transit (up to 1000 days).
+- Earth radio delay is 3 to 22 minutes one way (about 12 minutes in this simulation), with blackouts and no emergency evacuation. On-board crew health guidance must stand on its own.
 
-ALERT SYSTEM (ISS Caution & Warning Classes [R12]):
-- Class 0 (Nominal): Within limits. Silent unless crew asks.
-- Class 3 (Advisory): Approaching limit / slow trend — single calm notice.
-- Class 2 (Caution & Warning): Limit exceeded or harmful trend — immediate corrective action.
-- Class 1 (Emergency): Immediate life threat — immediate survival action, step by step.
+ALERT LEVELS (ISS Caution & Warning System [R12]):
+- Class 0 (Normal): Within safe limits. Stay quiet unless the crew talks to you.
+- Class 3 (Watch): Nearing a limit or slow trend. Give one calm heads-up.
+- Class 2 (Warning): Limit crossed or harmful trend. Tell the crew what to fix right away.
+- Class 1 (Emergency): Immediate danger. Give the critical survival step first, one step at a time.
 
 HARD DATA & SAFETY RULES (ARASAKA-ENG-001):
-1. NEVER diagnose clinically. Use observational/risk wording ("readings are consistent with", "indicates risk of") — never say "you have".
-2. ALWAYS call live engine tools before citing numbers. Never invent metrics.
-3. When citing numeric values in Q&A, note whether measured (sensed) or estimated (modelled), include uncertainty for modelled items, and cite mission clock if relevant.
-4. Keep slow modelled indices (bone loss, immune_index, cognitive_drift, sans_risk) off emergency visor alarms unless asked or directly pertinent.
-5. DXA / QCT scans are the measurement of record for bone mineral density; engine values are trajectory estimates.
-6. Advise contacting Habitat CMO or Flight Surgeon (~12 min one-way delay) ONLY when escalation criteria apply (career dose >=90%, SANS vision symptom, orthostatic drop persisting, unresponsive crew, severe unrecovered hypoxia/breach).`;
+1. NEVER diagnose clinically. Use plain observational wording ("readings point to" or "numbers are consistent with"), never "you have".
+2. ALWAYS call live engine tools before quoting numbers. Never guess or invent data.
+3. When quoting numbers in Q&A, state whether they are measured or estimated, include uncertainty for modelled items, and give mission clock time if helpful.
+4. Keep slow long-term trends (bone density, immune score, focus drift, vision risk) off emergency alerts unless asked or directly relevant.
+5. Bone scans (DXA) remain the official clinical record; modelled numbers are mission estimates.
+6. Suggest messaging the medical team (12-minute Earth delay) ONLY when escalation triggers apply (career radiation >= 90%, blurry vision symptom, persistent standing blood pressure drop, unresponsive crew, or unrecovered suit/oxygen emergency).`;
 
 export type ManualTopic =
   | "radiation_spe"
@@ -38,62 +35,61 @@ export type ManualTopic =
   | "all_limits";
 
 export const MANUAL_PLAYBOOKS: Record<ManualTopic, string> = {
-  radiation_spe: `RADIATION & SOLAR PARTICLE EVENT (SPE) PLAYBOOK [V1 4030, V1 4031, V1 4033, V2 6164, R2]:
-- Thresholds: Mars surface galactic baseline design < 0.9 mSv/day (Demo baseline 0.6 mSv/d; ISS observed 0.2-0.5 mSv/d). SPE alert fires >= 1.2 mSv/day (2x baseline) or > 0.9 mSv/d with solar_event_flag. Design reference SPE: stay below 250 mSv effective dose. Career limit (all ages/sexes): < 600 mSv (Class 3 at 75%, Class 2 at 90% -> escalate to Flight Surgeon).
-- Plan A (Standard): Terminate EVA immediately, move inside shielded habitat core, seal airlock, monitor dosimetry until flare decays (~40 mSv over 6h unshielded curve). Real-time alert dosimetry protects EVA crews when terminated < 2h and shielding is accessible.
-- Plan B (Stranded / Cannot reach habitat in time):
-  1. Immediately invoke 'execute_suit_action("engage_terrain_shield")' and 'update_action_plan' once Sir confirms cover.
-  2. Direct crew to the nearest high-mass terrain shielding within seconds: crater cliff wall, basalt boulder overhang, lava tube entrance, trench/regolith berm, or pressurized/unpressurized rover shadow.
-  3. Instruct crew to orient PLSS life-support backpack (water tank & batteries) toward the sun/flare vector while crouching low against rock mass to maximize hydrogenous/rock attenuation (~80% dose reduction).
-  4. Never keep repeating habitat return once Sir is pinned or too far — stabilize in field cover until flux drops.`,
+  radiation_spe: `RADIATION & SOLAR STORM PLAYBOOK [V1 4030, V1 4031, V2 6164, R2]:
+- Thresholds: Mars surface normal background < 0.9 mSv/day (Demo baseline ~0.35 to 0.6 mSv/d). Solar storm triggers >= 1.2 mSv/day or solar flag active. Event design goal < 250 mSv. Career limit: 600 mSv total (Watch at 75%, Warning & medical call at 90%).
+- Plan A (Standard): Stop outdoor work and head straight inside the habitat shelter, seal airlock, monitor until storm fades.
+- Plan B (Cannot reach habitat in time):
+  1. Call 'execute_suit_action("engage_terrain_shield")' and 'update_action_plan'.
+  2. Tell the crew to drop behind the nearest crater cliff wall, rock overhang, boulder shadow, trench, or rover body within seconds.
+  3. Orient the water-filled suit backpack (PLSS) toward the Sun while staying low against rock mass to block particle flux (~80% drop).
+- Plan C (Flat open ground, no rocks or rover): Dig a shallow depression or mound surface regolith beside the body, lie flat behind the backpack facing the Sun, and hold still until radiation drops.`,
 
-  suit_depressurization: `SUIT DEPRESSURIZATION / SEAL BREACH PLAYBOOK [V2 6006, EVA-P1]:
-- Thresholds: EVA suit nominal pressure ~43.0 kPa; EVA safety floor 29.6 kPa (Class 2 below 29.6 or < 34.5 warning; Class 1 emergency below 25.6 kPa). Cabin indefinite floor > 26.2 kPa (max 103 kPa; nominal 70 kPa). Note: Dropping suit barometric pressure sharply lowers inspired PIO2 = (P_mmHg - 47) * F_O2.
-- Plan A (Standard): Inspect glove wrist disconnects, neck ring latch, and PLSS Umbilical; tighten/reseat locking collar; abort EVA to airlock.
-- Plan B (Active Leak / Far from Airlock):
-  1. Call 'execute_suit_action("switch_secondary_o2")' to maintain partial O2 pressure if PIO2 dips, and guide crew to press gloved hand/thigh/patch tightly over suspected breach or check purge valve stuck open.
-  2. Once crew identifies/seals or clamps bypass valve, invoke 'execute_suit_action("seal_suit_breach")' and update plan via 'update_action_plan'.
-  3. Order crew to freeze excess motion (lowers O2 burn), keep comms minimal, and return carefully if pressure holds >= 35 kPa.`,
+  suit_depressurization: `SUIT DEPRESSURIZATION & SEAL LEAK PLAYBOOK [V2 6006, S-14]:
+- Thresholds: Normal EVA suit pressure ~43.0 kPa; safety floor 29.6 kPa (Class 2 below 29.6 kPa; Class 1 emergency below 25.6 kPa). Lower suit pressure drops inspired oxygen sharply.
+- Plan A (Standard): Check glove wrist rings, neck latch, and air hose locks, tighten loose latches, and head inside.
+- Plan B (Active leak or far from airlock):
+  1. Call 'execute_suit_action("switch_secondary_o2")' if oxygen dips, and guide crew to clamp or press gloved hand/patch firmly over leak or stuck purge valve.
+  2. Invoke 'execute_suit_action("seal_suit_breach")' once clamped and update plan via 'update_action_plan'.
+- Plan C (Patch failing or large rip): Switch to backup oxygen, pinch off/isolate the torn cuff if safe, freeze movement to conserve gas, and call habitat pickup.`,
 
-  co2_scrubber: `CO2 BUILDUP / SCRUBBER SATURATION PLAYBOOK [V2 6004, R4]:
-- Thresholds: Habitable volume 1-hour time-weighted average ppCO2 limit <= 3.0 mmHg (Class 3 advisory at 2.4 mmHg [80% of limit], Class 2 caution at 3.0 mmHg). Cognitive slowing (reaction time +15%) accompanies rising ppCO2.
-- Plan A (Standard): Verify LiOH / regenerable CO2 scrubber cartridge & fan airflow; switch to ventilated module or backup loop.
-- Plan B (EVA Jammed Scrubber / Far from Habitat):
-  1. Immediately order crew to STOP strenuous work (minimizes CO2 production).
-  2. Invoke 'execute_suit_action("open_loop_o2_purge")' to flush helmet loop with fresh O2 when Sir switches to purge/bypass valve, and update HUD plan via 'update_action_plan'.`,
+  co2_scrubber: `CO2 BUILDUP & SCRUBBER PLAYBOOK [V2 6004, R4]:
+- Thresholds: 1-hour average carbon dioxide limit <= 3.0 mmHg (Watch at 2.4 mmHg, Warning at 3.0 mmHg). Elevated CO2 slows thinking and reaction time.
+- Plan A (Standard): Check CO2 scrubber loop, fan airflow, and switch to fresh air or backup loop.
+- Plan B (Jammed scrubber outdoors):
+  1. Tell crew to stop hard physical effort immediately (cuts CO2 output).
+  2. Invoke 'execute_suit_action("open_loop_o2_purge")' to flush the helmet with fresh oxygen and update HUD via 'update_action_plan'.`,
 
-  hypoxia_pio2: `HYPOXIA / INSPIRED OXYGEN (PIO2) PLAYBOOK [V2 6003, R16]:
-- Thresholds: Normoxia target 145-155 mmHg; Class 3 < 145 mmHg; Class 2 mild hypoxia floor < 127 mmHg [R16, max 1 week acceptable duration]; Class 1 severe acute hypoxia < 110 mmHg; Indefinite hyperoxia ceiling 356 mmHg.
-- Immediate Action: Call 'execute_suit_action("switch_secondary_o2")' as Sir switches to backup O2 bottle/manifold, halt exertion, verify helmet seal & regulator pressure, and update HUD via 'update_action_plan'.`,
+  hypoxia_pio2: `OXYGEN DROP / HYPOXIA PLAYBOOK [V2 6003, R16]:
+- Thresholds: Normal breathing oxygen 145 to 155 mmHg; Watch < 145 mmHg; Mild low-oxygen floor < 127 mmHg; Emergency < 110 mmHg.
+- Immediate Action: Call 'execute_suit_action("switch_secondary_o2")' as the crew switches to the backup oxygen bottle, stop walking hard, check helmet seal, and update HUD via 'update_action_plan'.`,
 
-  exertion_cardio: `CARDIOVASCULAR & CONTEXT-AWARE STRAIN PLAYBOOK [ENG-CTX-001..003]:
-- Context HR Limits (Demo, 45yo baseline resting 58 bpm): Sleep/Cabin/Rest <= 100 bpm; Exercise/EVA <= 149 bpm (85% age max). HR 140 bpm during scheduled exercise or 138 bpm during EVA climb is EXPECTED and must NOT raise false alarms.
-- EVA Overexertion: If HR > 149 bpm with HRV drop (>= 40% under baseline) & high O2 burn, call 'execute_suit_action("rest_recovery_mode")' once crew halts work & hydrates from in-suit drink bag.`,
+  exertion_cardio: `HEART RATE & EFFORT PLAYBOOK [ENG-CTX-001..003]:
+- Expected heart rate limits (45-year-old baseline resting 58 bpm): Sleep/Rest/Cabin <= 100 bpm; Exercise/EVA walk <= 149 bpm. 140 bpm during exercise or 138 bpm climbing outside stays quiet because effort is expected.
+- Overexertion: If HR > 149 bpm on EVA, stop moving, rest two minutes, sip water from the helmet drink tube, and call 'execute_suit_action("rest_recovery_mode")'.`,
 
-  orthostatic: `ORTHOSTATIC HYPOTENSION PLAYBOOK [S-05]:
-- Trigger: Standing SBP drop >= 20 mmHg post-EVA or post-deconditioning.
-- Action: Sit or lie supine immediately to restore cerebral perfusion, ingest 300 mL electrolyte fluid, rest 5 min, recheck. Escalate to Flight Surgeon if persistent.`,
+  orthostatic: `DIZZINESS / BLOOD PRESSURE DROP PLAYBOOK [S-05]:
+- Trigger: Standing blood pressure drop >= 20 mmHg after a spacewalk or weeks of lower gravity.
+- Action: Sit or lie down right away so you do not faint, drink electrolyte fluids, rest 5 minutes, and recheck. Message the medical team if dizziness keeps returning.`,
 
-  sleep_circadian: `SLEEP DEBT & CIRCADIAN DRIFT PLAYBOOK [S-06, R6]:
-- Basis: Crew baseline 7.0 h/night (NASA ISS actigraphy 6.0-6.5 h average; alert triggers against crewmember's own baseline if 7-night mean shortfall >= 0.75 h).
-- Action: Schedule protected 8h sleep block, dim habitat blue light before sleep, avoid heavy EVA during nadir, update sleep reset plan.`,
+  sleep_circadian: `SLEEP LOSS PLAYBOOK [S-06, R6]:
+- Basis: Crew baseline 7.0 hours/night (Watch triggers if 7-night average drops >= 0.75 hours short).
+- Action: Dim habitat lights 90 minutes before bed, protect a full 8-hour sleep block tonight, and avoid late caffeine.`,
 
-  bone_exercise: `BONE MINERAL DENSITY & RESISTIVE EXERCISE PLAYBOOK [ENG 5.1, R7]:
-- Reference rates (Sibonga DXA, n=16-18): Lumbar 1.06%/mo (SD 0.63), Femoral neck 1.15%/mo (SD 0.84), Trochanter 1.56%/mo (SD 0.99), Pelvis 1.35%/mo (SD 0.54), Total body 0.35%/mo (SD 0.25). Model: B(t+dt) = B(t)*[1 - r*(1 - eps*c(t))*dt], eps=0.5 Demo, c(t) 14-day ARED compliance.
-- Critical disclosure: DXA/QCT scans are the measurement of record; model carries uncertainty bands and bisphosphonate co-therapy is not modelled.`,
+  bone_exercise: `BONE DENSITY & WORKOUT PLAYBOOK [ENG 5.1, R7]:
+- Reference rates (Sibonga DXA data): Spine loses ~1.06%/mo unmitigated; hip ~1.15%/mo. Strength training cuts loss roughly in half.
+- Note: Hospital/habitat DXA scans remain the official measurement of record; model outputs carry uncertainty ranges.`,
 
-  immune_sans: `IMMUNE STRESS & SANS PLAYBOOK [ENG 5.2, R8, R9, R19]:
-- Immune index (0-100 Demo): Driven by sleep debt, stress, cortisol, cumulative dose. Alerts <= 70. Basis: Latent herpesvirus shedding increased in long flight — VZV DNA in saliva of 15/23 ISS crew (65%), EBV 22/23 (96%), CMV 14/23 (61%), mostly asymptomatic [R8].
-- SANS (S-10): About 66% of ISS crew show early SANS signs; 16-19% clinically relevant optic disc edema [R9, R19]. Escalate blurred near vision to Flight Surgeon (~12 min delay), log symptom & visual acuity check.`,
+  immune_sans: `IMMUNE & VISION PLAYBOOK [ENG 5.2, R8, R9, R19]:
+- Immune score (0 to 100): Tracks combined sleep debt, stress, cortisol, and radiation. Alerts at <= 70. Prioritize rest and sleep recovery.
+- Vision (SANS): Fluid shifts in low gravity can flatten the back of the eye over months (~66% show early signs on ISS; 16 to 19% optic disc swelling [R9, R19]). Log blurry near vision, run a simple chart test, and send a note to the medical team.`,
 
-  all_limits: `FULL NASA-STD-3001 & DEMO LIMIT QUICK TABLE:
-- Career effective dose: < 600 mSv [V1 4030] (Class 3 @ 75%, Class 2 @ 90%).
-- Design SPE event: < 250 mSv [V1 4031]; SPE trigger: >= 1.2 mSv/day [V2 6164 / V1 4033].
-- CO2 (ppCO2 1h mean): <= 3.0 mmHg [V2 6004] (Class 3 >= 2.4, Class 2 >= 3.0).
-- Inspired O2 (PIO2): Normoxia 145-155 mmHg [V2 6003]; Class 3 < 145; Mild hypoxia < 127 [R16]; Class 1 < 110; Hyperoxia ceiling 356 mmHg.
-- Pressure: Cabin 26.2-103 kPa [V2 6006]; EVA suit 29.6-45 kPa (Class 1 < 25.6 kPa).
-- Thermal/RH [V2 6012/6013]: 18-27 C, 25-75% RH (performance 20-25 C, 30-60% RH).
-- Context HR: 100 bpm (sleep/cabin/rest), 149 bpm (EVA/exercise).`,
+  all_limits: `NASA-STD-3001 & SUIT LIMITS SUMMARY:
+- Career radiation limit: 600 mSv (Watch 75%, Warning 90%).
+- Solar storm alert: >= 1.2 mSv/day (Design event cap 250 mSv).
+- Carbon dioxide (1-hour average): <= 3.0 mmHg (Watch 2.4 mmHg).
+- Breathing oxygen (PIO2): Normal 145 to 155 mmHg; Low < 127 mmHg; Emergency < 110 mmHg.
+- Pressure: Cabin 26.2 to 103 kPa (nominal 70 kPa); Suit 29.6 to 45 kPa (nominal 43 kPa, Emergency < 25.6 kPa).
+- Heart rate limit: 100 bpm resting inside, 149 bpm during exercise or spacewalk.`,
 };
 
 export function lookupManualTopic(topic: string): string {

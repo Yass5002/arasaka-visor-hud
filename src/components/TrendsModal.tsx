@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { CrewHealthEngine } from "../engine/engine";
-import type { IndicatorId, LiveState } from "../engine/types";
+import type { EventLogEntry, IndicatorId, LiveState } from "../engine/types";
 
 export interface TrendsModalProps {
   open: boolean;
@@ -18,131 +18,174 @@ const CHART_INDICATORS: Array<{
 }> = [
   {
     id: "dose_cumulative",
-    title: "Cumulative Effective Dose (Modelled)",
+    title: "Total Radiation Dose (Estimated)",
     unit: "mSv",
     color: "#ffb84d",
-    refLine: { value: 600, label: "600 mSv [V1 4030]" },
+    refLine: { value: 600, label: "600 mSv career limit" },
   },
   {
     id: "bone_loss_lumbar",
-    title: "Lumbar Spine BMD Estimate (DXA Modelled, c(t) Compliance)",
+    title: "Lower Spine Bone Strength (Estimated)",
     unit: "%",
     color: "#02bfe7",
   },
   {
     id: "bone_loss_femoral_neck",
-    title: "Femoral Neck BMD Estimate (DXA Modelled)",
+    title: "Hip Bone Strength (Estimated)",
     unit: "%",
-    color: "#38bdf8",
+    color: "#5fa8ff",
   },
   {
     id: "immune_index",
-    title: "Demonstration Immune Index (Composite)",
+    title: "Immune Score (Demo Estimate)",
     unit: "/100",
-    color: "#a78bfa",
-    refLine: { value: 70, label: "70 Watch Threshold (Demo)" },
+    color: "#2e8540",
   },
   {
     id: "cognitive_drift",
-    title: "Cognitive Drift Index (Composite Demo)",
-    unit: "/100",
-    color: "#f472b6",
+    title: "Reaction Speed Change (Measured)",
+    unit: "ms",
+    color: "#ff9b4d",
   },
   {
     id: "sans_risk",
-    title: "SANS Risk Demonstration Index",
+    title: "Eye Fluid Risk Index (Estimated)",
     unit: "/100",
-    color: "#fb923c",
+    color: "#a78bfa",
   },
 ];
 
-function MiniTrendChart({
-  title,
-  unit,
-  color,
-  series,
-  uncertainty,
-  refLine,
-}: {
+function formatMissionTime(tSec: number): string {
+  const day = Math.floor(tSec / 86400) + 1;
+  const hh = Math.floor((tSec % 86400) / 3600);
+  const mm = Math.floor((tSec % 3600) / 60);
+  return `Day ${day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function describeEvent(e: EventLogEntry): { title: string; detail: string } {
+  const p = e.payload ?? {};
+  switch (e.type) {
+    case "alert_raised":
+      return {
+        title: `Alert started: ${String(p.title ?? p.detectorId ?? "Safety warning")}`,
+        detail: String(p.whyLine ?? ""),
+      };
+    case "alert_cleared":
+      return {
+        title: `Alert cleared: ${String(p.title ?? p.detectorId ?? "Condition normal")}`,
+        detail: "Readings moved back into a safe range.",
+      };
+    case "step_completed":
+      return {
+        title: `Step confirmed: ${String(p.protocolId ?? "procedure")}`,
+        detail: String(p.instruction ?? p.stepLabel ?? "Moved to next action step."),
+      };
+    case "preset_fired":
+      return {
+        title: `Event triggered: ${String(p.presetId ?? "scenario")}`,
+        detail: p.mode === "stacked" ? "Added to active simulation." : "Started fresh scenario.",
+      };
+    case "unresponsive_crew_escalation":
+      return {
+        title: "Medical team updated",
+        detail: String(p.reason ?? "No response after repeated check-ins."),
+      };
+    case "assistant_said":
+      return {
+        title: "Assistant message",
+        detail: String(p.text ?? p.message ?? ""),
+      };
+    case "astronaut_asked":
+      return {
+        title: "Crew message",
+        detail: String(p.question ?? p.text ?? ""),
+      };
+    case "exercise_session":
+      return {
+        title: "Exercise session logged",
+        detail: "Workout recorded for long-term bone and heart tracking.",
+      };
+    default: {
+      const cleanType = e.type.replace(/_/g, " ");
+      const summary = Object.entries(p)
+        .filter(([, v]) => typeof v === "string" || typeof v === "number")
+        .slice(0, 3)
+        .map(([k, v]) => `${k}: ${String(v)}`)
+        .join(", ");
+      return {
+        title: cleanType.charAt(0).toUpperCase() + cleanType.slice(1),
+        detail: summary,
+      };
+    }
+  }
+}
+
+const MiniTrendChart: React.FC<{
   title: string;
   unit: string;
   color: string;
-  series: Array<{ t: number; value: number; min: number; max: number }>;
-  uncertainty?: { low: number; high: number; note: string };
+  points: Array<{ t: number; value: number; min: number; max: number }>;
   refLine?: { value: number; label: string };
-}) {
-  const W = 380;
-  const H = 105;
-  const padX = 10;
-  const padY = 12;
+}> = ({ title, unit, color, points, refLine }) => {
+  const width = 360;
+  const height = 112;
+  const padX = 12;
+  const padY = 14;
 
-  const vals = series.map((p) => p.value);
-  if (refLine) vals.push(refLine.value);
-  if (vals.length === 0) vals.push(0, 1);
+  const vals = points.map((p) => p.value);
+  if (refLine && vals.length > 0 && Math.max(...vals) > refLine.value * 0.7) {
+    vals.push(refLine.value);
+  }
+  const minVal = vals.length > 0 ? Math.min(...vals) : 0;
+  const maxVal = vals.length > 0 ? Math.max(...vals) : 100;
+  const span = Math.max(0.01, maxVal - minVal);
 
-  const minV = Math.min(...vals);
-  const maxV = Math.max(...vals);
-  const span = Math.max(0.01, maxV - minV);
+  const mapX = (idx: number) =>
+    points.length <= 1 ? padX : padX + (idx / (points.length - 1)) * (width - padX * 2);
+  const mapY = (v: number) =>
+    height - padY - ((v - minVal) / span) * (height - padY * 2);
 
-  const toX = (idx: number) =>
-    series.length <= 1 ? padX : padX + (idx / (series.length - 1)) * (W - padX * 2);
-  const toY = (v: number) => H - padY - ((v - minV) / span) * (H - padY * 2);
+  const linePath =
+    points.length > 1
+      ? points.map((p, i) => `${i === 0 ? "M" : "L"}${mapX(i).toFixed(1)},${mapY(p.value).toFixed(1)}`).join(" ")
+      : "";
 
-  const polyPoints = series.map((p, i) => `${toX(i).toFixed(1)},${toY(p.value).toFixed(1)}`).join(" ");
-  const latest = series[series.length - 1]?.value;
+  const latest = points.length > 0 ? points[points.length - 1].value : null;
 
   return (
-    <div className="hds-card">
-      <div className="hds-card-title">
-        <span>{title}</span>
-        <strong className="mono" style={{ color }}>
-          {latest !== undefined ? `${latest.toFixed(2)} ${unit}` : "No data"}
-        </strong>
+    <div className="hds-trend-card">
+      <div className="hds-trend-head">
+        <strong>{title}</strong>
+        <span className="hds-num">
+          {latest !== null ? `${latest.toFixed(1)} ${unit}` : "Waiting for data"}
+        </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 96, display: "block" }}>
-        {refLine && (
-          <>
+      <svg className="hds-trend-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+        {refLine && refLine.value >= minVal && refLine.value <= maxVal && (
+          <g>
             <line
               x1={padX}
-              x2={W - padX}
-              y1={toY(refLine.value)}
-              y2={toY(refLine.value)}
+              x2={width - padX}
+              y1={mapY(refLine.value)}
+              y2={mapY(refLine.value)}
               stroke="#dd361c"
+              strokeWidth="1"
               strokeDasharray="4 4"
-              strokeWidth="1.2"
             />
-            <text
-              x={W - padX - 4}
-              y={Math.max(12, toY(refLine.value) - 4)}
-              textAnchor="end"
-              fill="#ffb8ad"
-              fontSize="9"
-              fontFamily="DM Mono, monospace"
-            >
+            <text x={width - padX} y={Math.max(12, mapY(refLine.value) - 4)} textAnchor="end" fill="#ff8f7d" fontSize="10">
               {refLine.label}
             </text>
-          </>
+          </g>
         )}
-        {series.length >= 2 && (
-          <polyline fill="none" stroke={color} strokeWidth="2.2" points={polyPoints} />
-        )}
-        {series.length > 0 && (
-          <circle
-            cx={toX(series.length - 1)}
-            cy={toY(series[series.length - 1].value)}
-            r="3.5"
-            fill={color}
-          />
+        {points.length > 1 ? (
+          <path d={linePath} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+        ) : (
+          <line x1={padX} x2={width - padX} y1={height / 2} y2={height / 2} stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
         )}
       </svg>
-      {uncertainty && (
-        <div className="mono" style={{ fontSize: 10, color: "#aeb0b5", marginTop: 4 }}>
-          Uncertainty band: {uncertainty.low}–{uncertainty.high} {unit} · {uncertainty.note}
-        </div>
-      )}
     </div>
   );
-}
+};
 
 export const TrendsModal: React.FC<TrendsModalProps> = ({ open, onClose, engine, liveState }) => {
   const [resolution, setResolution] = useState<"hourly" | "daily">("daily");
@@ -159,7 +202,7 @@ export const TrendsModal: React.FC<TrendsModalProps> = ({ open, onClose, engine,
 
   if (!open) return null;
 
-  const events = engine.store.getEvents({ includeAbandonedRuns: includeAllRuns }).slice(-40).reverse();
+  const events = engine.store.getEvents({ includeAbandonedRuns: includeAllRuns }).slice(-25).reverse();
 
   const handleExportJson = () => {
     const json = engine.store.exportAllJson();
@@ -167,108 +210,135 @@ export const TrendsModal: React.FC<TrendsModalProps> = ({ open, onClose, engine,
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `arasaka-health-export-sol${liveState.missionDay}.json`;
+    a.download = `suit-simulation-day-${liveState.missionDay}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div
-      className="overlay-backdrop"
-      role="presentation"
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Health trends and activity timeline"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="modal-center" role="dialog" aria-label="Habitat & Wrist Slow Trends and Record">
-        <div className="drawer-header">
+      <div className="modal-card modal-card-lg">
+        <div className="modal-header">
           <div>
-            <div className="drawer-title">HABITAT REVIEW & SLOW HEALTH TRENDS (OFF-VISOR)</div>
-            <div className="mono" style={{ fontSize: 10.5, color: "#96c2ff" }}>
-              CONOPS §4.3 · SIM-HUD-001 · Append-Only Crew Health Record & Export (ENG-SAF-004)
-            </div>
+            <h2 className="modal-title">Health Trends</h2>
+            <p className="modal-subtitle">
+              Track gradual changes across days and review recent suit actions.
+            </p>
           </div>
-          <div className="chip-row">
-            <button type="button" className="hds-btn hds-btn-primary" onClick={handleExportJson}>
-              Export JSON Record
-            </button>
-            <button type="button" className="hds-btn" onClick={onClose}>
-              Close
-            </button>
-          </div>
+          <button type="button" className="hds-btn hds-btn-sm" onClick={onClose}>
+            Close
+          </button>
         </div>
 
-        <div className="drawer-body">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="modal-body">
+          {/* Controls bar */}
+          <div className="hds-toolbar">
             <div className="chip-row">
-              {(["daily", "hourly"] as const).map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  className={`chip-btn ${resolution === r ? "active" : ""}`}
-                  onClick={() => setResolution(r)}
-                >
-                  {r.toUpperCase()} ROLLUP
-                </button>
-              ))}
-            </div>
-            <span className="mono" style={{ fontSize: 11, color: "#aeb0b5" }}>
-              Run: {liveState.runId} · Sleep Debt (14d): {liveState.indicators.sleep_debt.value.toFixed(1)} h ·
-              Exercise (7d): {liveState.indicators.exercise_sessions.value} sessions
-            </span>
-          </div>
-
-          <div className="grid-2">
-            {CHART_INDICATORS.map((cfg) => {
-              const series = engine.store.getRollupSeries(cfg.id, 0, liveState.t + 1, resolution);
-              const liveInd = liveState.indicators[cfg.id];
-              return (
-                <MiniTrendChart
-                  key={cfg.id}
-                  title={cfg.title}
-                  unit={cfg.unit}
-                  color={cfg.color}
-                  series={series}
-                  uncertainty={liveInd?.uncertainty}
-                  refLine={cfg.refLine}
-                />
-              );
-            })}
-          </div>
-
-          <div className="hds-card">
-            <div className="hds-card-title">
-              <span>Append-Only Event Log ({events.length} shown)</span>
               <button
                 type="button"
-                className={`chip-btn ${includeAllRuns ? "active" : ""}`}
-                onClick={() => setIncludeAllRuns((v) => !v)}
+                className={`chip-btn ${resolution === "daily" ? "active" : ""}`}
+                onClick={() => setResolution("daily")}
               >
-                {includeAllRuns ? "Showing All Runs (Incl. Restores)" : "Current Run Only"}
+                Daily view
+              </button>
+              <button
+                type="button"
+                className={`chip-btn ${resolution === "hourly" ? "active" : ""}`}
+                onClick={() => setResolution("hourly")}
+              >
+                Hourly view
               </button>
             </div>
-            <div style={{ maxHeight: 190, overflowY: "auto", fontSize: 11.5 }} className="mono">
-              {events.map((ev) => (
-                <div
-                  key={ev.id}
-                  style={{
-                    padding: "4px 0",
-                    borderBottom: "1px dashed rgba(150, 194, 255, 0.1)",
-                    display: "flex",
-                    gap: 10,
-                  }}
-                >
-                  <span style={{ color: "#02bfe7", flexShrink: 0 }}>
-                    Sol {Math.floor(ev.t / 86400) + 1} ({ev.t}s)
-                  </span>
-                  <span style={{ color: "#ffb84d", flexShrink: 0 }}>{ev.type}</span>
-                  <span style={{ color: "#cbd5e1", wordBreak: "break-word" }}>
-                    {JSON.stringify(ev.payload)}
-                  </span>
-                </div>
-              ))}
+
+            <div className="hds-inline-controls">
+              <label className="hds-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={includeAllRuns}
+                  onChange={(e) => setIncludeAllRuns(e.target.checked)}
+                />
+                <span>Include earlier runs</span>
+              </label>
+              <button type="button" className="hds-btn hds-btn-sm" onClick={handleExportJson}>
+                Save data
+              </button>
             </div>
           </div>
+
+          {/* Summary cards */}
+          <div className="hds-summary-strip">
+            <div className="hds-summary-tile">
+              <span>Current day</span>
+              <strong className="hds-num">
+                Day {liveState.missionDay} / {liveState.missionLengthDays}
+              </strong>
+            </div>
+            <div className="hds-summary-tile">
+              <span>Career radiation used</span>
+              <strong className="hds-num">{liveState.careerDosePercent.toFixed(1)}%</strong>
+            </div>
+            <div className="hds-summary-tile">
+              <span>Sleep last night</span>
+              <strong className="hds-num">{liveState.indicators.sleep_hours.value.toFixed(1)} hrs</strong>
+            </div>
+            <div className="hds-summary-tile">
+              <span>Estimated spine bone</span>
+              <strong className="hds-num">{liveState.indicators.bone_loss_lumbar.value.toFixed(2)}%</strong>
+            </div>
+          </div>
+
+          {/* Charts */}
+          <section className="hds-section">
+            <h3 className="hds-section-title">Over time</h3>
+            <div className="hds-trends-grid">
+              {CHART_INDICATORS.map((cfg) => {
+                const series = engine.store.getRollupSeries(cfg.id, 0, liveState.t + 1, resolution);
+                return (
+                  <MiniTrendChart
+                    key={cfg.id}
+                    title={cfg.title}
+                    unit={cfg.unit}
+                    color={cfg.color}
+                    points={series}
+                    refLine={cfg.refLine}
+                  />
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Plain human-readable event timeline (no JSON terminal log) */}
+          <section className="hds-section">
+            <h3 className="hds-section-title">Recent events</h3>
+            {events.length === 0 ? (
+              <p className="hds-body-sm hds-muted">
+                No alerts or crew actions yet. Start a scenario from Events &amp; Controls to see how the timeline updates.
+              </p>
+            ) : (
+              <div className="hds-event-feed">
+                {events.map((ev) => {
+                  const info = describeEvent(ev);
+                  return (
+                    <div key={ev.id} className="hds-event-row">
+                      <span className="hds-event-time hds-num">{formatMissionTime(ev.t)}</span>
+                      <div className="hds-event-content">
+                        <strong>{info.title}</strong>
+                        {info.detail && <p className="hds-body-sm hds-muted">{info.detail}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

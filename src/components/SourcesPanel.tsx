@@ -20,79 +20,75 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({ open, onClose }) => 
 
   return (
     <div
-      className="overlay-backdrop"
-      role="presentation"
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Safety guide and references"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="modal-center" role="dialog" aria-label="Standards, Sources, and Basis Legend">
-        <div className="drawer-header">
+      <div className="modal-card modal-card-md">
+        <div className="modal-header">
           <div>
-            <div className="drawer-title">STANDARDS, SCIENTIFIC REFERENCES & BASIS LEGEND</div>
-            <div className="mono" style={{ fontSize: 10.5, color: "#96c2ff" }}>
-              Appendix A Master References (R1–R19) · NASA-STD-3001 Vol 1/2 Rev F · Demo Disclosure
-            </div>
+            <h2 className="modal-title">Safety Guide &amp; References</h2>
+            <p className="modal-subtitle">
+              How alert levels work and the published aerospace standards behind them.
+            </p>
           </div>
-          <button type="button" className="hds-btn" onClick={onClose}>
+          <button type="button" className="hds-btn hds-btn-sm" onClick={onClose}>
             Close
           </button>
         </div>
 
-        <div className="drawer-body">
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Threshold Provenance & Color Encoding (SIM-DOC-003)</span>
-            </div>
-            <p style={{ fontSize: 12.5, lineHeight: 1.5, color: "#dbeafe", marginBottom: 8 }}>
-              Every threshold is tagged explicitly with its source basis:
-              {" "}<strong>[V1 / V2 ...]</strong> comes from <em>NASA-STD-3001 Vol 1 &amp; Vol 2 (Rev F update: cabin pressure lower bound 34.5 kPa)</em>;
-              {" "}<strong>NASA ref</strong> reflects peer-reviewed NASA flight reports (Sibonga DXA bone rates, Crucian immune/viral reactivation, SANS OCT);
-              {" "}<strong>Design</strong> marks software windows and hysteresis;
-              {" "}<strong>Demo</strong> marks placeholder clinical/index bands awaiting flight-surgeon verification (<code>immune_index</code>, <code>cognitive_drift</code>, <code>sans_risk</code>).
+        <div className="modal-body">
+          <section className="hds-section">
+            <h3 className="hds-section-title">How alerts are prioritized</h3>
+            <p className="hds-body-sm hds-muted">
+              Urgent physical dangers always come first with one clear step to do right now. Long-term trends like bone strength or sleep stay out of the way unless you ask about them.
             </p>
-            <div className="chip-row" style={{ fontSize: 11.5 }}>
-              <span className="chip-btn badge-class-0">Class 0: Cyan #96C2FF (Nominal)</span>
-              <span className="chip-btn badge-class-3">Class 3: Amber #FFB84D (Advisory)</span>
-              <span className="chip-btn badge-class-2">Class 2: Red #FF4828 (Warning)</span>
-              <span className="chip-btn badge-class-1">Class 1: Flashing Red #FF4828 (Emergency)</span>
-            </div>
-            <p style={{ fontSize: 11.5, color: "#aeb0b5", marginTop: 8 }}>
-              Color note: Red &amp; Amber are chosen for urgent HUD contrast against rusted Mars Perseverance terrain; all alert colors carry explicit Class labels and audio/text cues for color-vision deficiency safety.
-            </p>
-          </section>
-
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>3D Backdrop & Terrain Credits</span>
-            </div>
-            {TERRAIN_SOURCES.map((tr) => (
-              <div key={tr.id} style={{ fontSize: 12, padding: "4px 0", color: "#cbd5e1" }}>
-                <strong>{tr.label}</strong> ({tr.available ? "Active" : "Assets pending"}): {tr.credit} ·{" "}
-                <span style={{ color: "#aeb0b5" }}>{tr.licence}</span>
+            <div className="hds-level-grid">
+              <div className="hds-level-item">
+                <span className="status-pill c0">Normal</span>
+                <p>Suit and body readings are in a safe range.</p>
               </div>
-            ))}
+              <div className="hds-level-item">
+                <span className="status-pill c3">Watch</span>
+                <p>Something is starting to drift and should be watched.</p>
+              </div>
+              <div className="hds-level-item">
+                <span className="status-pill c2">Warning</span>
+                <p>A limit was crossed. Action is needed soon.</p>
+              </div>
+              <div className="hds-level-item">
+                <span className="status-pill c1">Emergency</span>
+                <p>Immediate safety risk. Follow the step shown right away.</p>
+              </div>
+            </div>
           </section>
 
-          <section className="hds-card">
-            <div className="hds-card-title">
-              <span>Master Reference Register (R1 – R19)</span>
+          <section className="hds-section">
+            <h3 className="hds-section-title">Helmet scene locations</h3>
+            <div className="hds-ref-list">
+              {TERRAIN_SOURCES.map((tr) => (
+                <div key={tr.id} className="hds-ref-item">
+                  <strong>{tr.label}</strong>
+                  <p className="hds-body-sm hds-muted">
+                    Credit: {tr.credit}. {tr.licence}
+                  </p>
+                </div>
+              ))}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          </section>
+
+          <section className="hds-section">
+            <h3 className="hds-section-title">Standards and medical references</h3>
+            <div className="hds-ref-list">
               {MASTER_REFERENCES.map((ref) => (
-                <div
-                  key={ref.id}
-                  style={{
-                    fontSize: 12,
-                    paddingBottom: 6,
-                    borderBottom: "1px dashed rgba(150, 194, 255, 0.12)",
-                  }}
-                >
-                  <div>
-                    <strong className="mono" style={{ color: "#02bfe7" }}>
-                      {ref.id}
-                    </strong>{" "}
-                    — <span>{ref.citation}</span>
+                <div key={ref.id} className="hds-ref-item">
+                  <div className="hds-ref-head">
+                    <strong>{ref.citation}</strong>
+                    <span className="hds-pill">{ref.id}</span>
                   </div>
                 </div>
               ))}

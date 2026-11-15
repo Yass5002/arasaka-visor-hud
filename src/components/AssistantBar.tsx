@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import type { AssistantCaptionState } from "../assistant/assistantController";
-import { ENGINE_LIMITS } from "../engine/config";
-import type { LiveState } from "../engine/types";
+import type { ActivityType, LiveState } from "../engine/types";
 
 export interface ChatHistoryItem {
   id: string;
@@ -27,6 +26,34 @@ export interface AssistantBarProps {
   onOpenSettings: () => void;
 }
 
+const ACTIVITY_LABELS: Record<ActivityType, string> = {
+  eva: "Outside EVA",
+  cabin: "Inside Habitat",
+  exercise: "Workout",
+  sleep: "Sleep",
+  rest: "Rest",
+};
+
+function classBadgeText(c: number): string {
+  if (c === 1) return "Emergency";
+  if (c === 2) return "Warning";
+  if (c === 3) return "Watch";
+  return "Normal";
+}
+
+function classTone(c: number): string {
+  if (c === 1) return "c1";
+  if (c === 2) return "c2";
+  if (c === 3) return "c3";
+  return "c0";
+}
+
+function formatMissionClock(day: number, todSec: number): string {
+  const hh = Math.floor(todSec / 3600) % 24;
+  const mm = Math.floor(todSec / 60) % 60;
+  return `Day ${day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 export const AssistantBar: React.FC<AssistantBarProps> = ({
   liveState,
   captionState,
@@ -44,293 +71,265 @@ export const AssistantBar: React.FC<AssistantBarProps> = ({
   onOpenSettings,
 }) => {
   const [input, setInput] = useState("");
-  const primary = liveState.rankedPrimaryAlert;
-  const proto = liveState.activeProtocol;
+  const primaryAlert = liveState.rankedPrimaryAlert;
+  const activeProtocol = liveState.activeProtocol;
+  const queuedCount = liveState.pausedProtocols?.length ?? 0;
 
-  const hh = Math.floor(liveState.timeOfDaySec / 3600) % 24;
-  const mm = Math.floor(liveState.timeOfDaySec / 60) % 60;
-  const clockStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  const isEva = liveState.context.activity === "eva";
+  const pressure = isEva
+    ? liveState.indicators.suit_pressure.value
+    : liveState.indicators.cabin_pressure.value;
 
-  const submitQuestion = (q: string) => {
-    const trimmed = q.trim();
-    if (!trimmed) return;
-    onAsk(trimmed);
+  const quickPrompts =
+    primaryAlert || activeProtocol
+      ? [
+          "I can't make it back in time",
+          "Why is this happening?",
+          "What else needs attention?",
+          "Check my radiation",
+        ]
+      : [
+          "How am I doing?",
+          "Check my radiation",
+          "How is my heart rate?",
+          "Check oxygen and air",
+        ];
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = input.trim();
+    if (!q) return;
+    onAsk(q);
     setInput("");
   };
 
   return (
-    <aside className="mission-dock" aria-label="Crew Health Console and Assistant">
-      {/* Clean docked header toolbar — zero floating overlap */}
-      <div className="dock-header">
-        <div className="sim-pill" title="All health telemetry and mission scenarios are simulated">
-          <span className="sim-pill-dot" />
-          SIMULATED DATA
-        </div>
-        <div className="dock-nav-btns">
-          <button
-            type="button"
-            className="hds-btn hds-btn-primary"
-            onClick={onOpenSimulation}
-            title="Open Simulation & Events Studio (Clock, Context, Events, Sliders)"
-          >
-            Events
-          </button>
-          <button type="button" className="hds-btn" onClick={onOpenTrends}>
-            Trends
-          </button>
-          <button type="button" className="hds-btn" onClick={onOpenSources}>
-            Sources
-          </button>
-          <button
-            type="button"
-            className="hds-btn hds-icon-btn"
-            onClick={onOpenSettings}
-            aria-label="Open Technical and Voice Settings"
-            title="Technical & Voice Settings"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Mission Status Readout */}
-      <div className="hds-card">
-        <div className="hds-card-title">
-          <span>
-            SOL {liveState.missionDay}/{liveState.missionLengthDays} · {clockStr}
-          </span>
-          <span className={`badge-class-${liveState.overallClass}`}>
-            {liveState.context.activity.toUpperCase()} · CLASS {liveState.overallClass}
-          </span>
-        </div>
-
-        <div className="grid-2 mono" style={{ fontSize: 11.5, color: "#dbeafe" }}>
-          <div>Dose Rate: {liveState.indicators.dose_rate.value.toFixed(2)} mSv/d</div>
-          <div>
-            {liveState.context.activity === "eva"
-              ? `Suit Press: ${liveState.indicators.suit_pressure.value.toFixed(1)} kPa`
-              : `Career: ${liveState.careerDosePercent.toFixed(1)}% / 600`}
-          </div>
-          <div>ppCO₂: {liveState.indicators.ppco2.value.toFixed(2)} mmHg</div>
-          <div>PIO₂: {Math.round(liveState.indicators.pio2.value)} mmHg</div>
-        </div>
-      </div>
-
-      {/* Unresponsive Crew NASA Escalation Beacon */}
-      {captionState.unresponsiveEscalated && (
-        <div
-          className="hds-card"
-          style={{
-            borderColor: "#ff4828",
-            background: "rgba(221, 54, 28, 0.28)",
-          }}
-        >
-          <div className="hds-card-title">
-            <span className="badge-class-1">CREW UNRESPONSIVE · HAILING HABITAT</span>
-          </div>
-          <div style={{ fontSize: 11.5, color: "#ffe4e0" }}>
-            No response detected &gt;45 s. Autonomous telemetry packet queued for Flight Surgeon (~12 min delay).
-          </div>
-        </div>
-      )}
-
-      {/* Active Ranked Alert & Protocol Stepper */}
-      {primary && (
-        <div
-          className="hds-card"
-          style={{
-            borderColor: primary.class <= 2 ? "#dd361c" : "#ffb84d",
-            background:
-              primary.class <= 2 ? "rgba(221, 54, 28, 0.14)" : "rgba(255, 184, 77, 0.10)",
-          }}
-        >
-          <div className="hds-card-title">
-            <span className={`badge-class-${primary.class}`}>
-              CLASS {primary.class} · {primary.title}
+    <aside className="mission-dock" aria-label="Spacesuit assistant controls">
+      {/* Header */}
+      <header className="dock-header">
+        <div className="dock-brand-block">
+          <div className="dock-title-row">
+            <h1 className="dock-title">Suit Assistant</h1>
+            <span className={`status-pill ${classTone(liveState.overallClass)}`}>
+              {classBadgeText(liveState.overallClass)}
             </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {(liveState.pausedProtocols?.length ?? 0) > 0 && (
-                <span className="mono" style={{ fontSize: 10.5, color: "#ffb84d" }}>
-                  +{liveState.pausedProtocols.length} QUEUED
-                </span>
+          </div>
+          <div className="dock-meta-row">
+            <span className="hds-num">{formatMissionClock(liveState.missionDay, liveState.timeOfDaySec)}</span>
+            <span className="dock-sep" aria-hidden="true">·</span>
+            <span>{ACTIVITY_LABELS[liveState.context.activity] ?? "Outside EVA"}</span>
+          </div>
+        </div>
+
+        <div className="dock-header-actions">
+          <button
+            type="button"
+            className={`hds-btn hds-btn-sm ${captionState.isListening ? "active" : ""}`}
+            onClick={onToggleListening}
+            title="Turn microphone listening on or off"
+          >
+            {captionState.isListening ? "Mic On" : "Mic"}
+          </button>
+          <button
+            type="button"
+            className={`hds-btn hds-btn-sm ${captionState.voiceConnected ? "active" : ""}`}
+            onClick={onToggleVoice}
+            title="Turn spoken voice replies on or off"
+          >
+            {captionState.voiceConnected ? "Voice On" : "Voice Off"}
+          </button>
+          {captionState.isSpeaking && (
+            <button
+              type="button"
+              className="hds-btn hds-btn-sm hds-btn-warn"
+              onClick={onStopSpeaking}
+            >
+              Mute
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* Unresponsive crew notice */}
+      {captionState.unresponsiveEscalated && (
+        <section className="hds-card hds-alert-banner c1" role="alert">
+          <div className="hds-alert-top">
+            <strong>No reply received</strong>
+            <span className="hds-pill">Medical notified</span>
+          </div>
+          <p className="hds-body-sm">
+            Sent an emergency update to the medical team (12-minute signal delay). Let me know once you are okay.
+          </p>
+          <button type="button" className="hds-btn hds-btn-primary hds-btn-sm" onClick={onConfirmStep}>
+            I am okay
+          </button>
+        </section>
+      )}
+
+      {/* Active alert and single next step */}
+      {(activeProtocol || primaryAlert) && (
+        <section
+          className={`hds-card hds-protocol-card ${classTone(
+            primaryAlert?.class ?? (activeProtocol ? 2 : 0)
+          )}`}
+          aria-live="polite"
+        >
+          <div className="hds-alert-top">
+            <h2 className="hds-card-heading">
+              {activeProtocol ? activeProtocol.name : primaryAlert?.title}
+            </h2>
+            <div className="hds-pill-group">
+              {activeProtocol?.contingencyTitle && (
+                <span className="hds-pill info">Backup plan</span>
               )}
-              {primary.state === "active" && (
-                <>
-                  <button
-                    type="button"
-                    className="chip-btn"
-                    onClick={() => onAcknowledgeAlert(primary.id)}
-                  >
-                    Ack
-                  </button>
-                  {onSilenceAlarms && (
-                    <button
-                      type="button"
-                      className="chip-btn"
-                      onClick={onSilenceAlarms}
-                      title="Mute repeating klaxon/caution horn"
-                    >
-                      Silence
-                    </button>
-                  )}
-                </>
+              {queuedCount > 0 && (
+                <span className="hds-pill">{queuedCount} waiting</span>
               )}
             </div>
           </div>
-          <div style={{ fontSize: 12, color: "#f8fafc", marginBottom: 6 }}>{primary.whyLine}</div>
-          {primary.escalateToMedical && (
-            <div className="mono" style={{ fontSize: 10.5, color: "#ffb84d", marginBottom: 6 }}>
-              Advise flight surgeon contact (Earth reply ~{ENGINE_LIMITS.earthReplyDelayMin.value} min).
+
+          {primaryAlert?.whyLine && (
+            <p className="hds-body-sm hds-muted">{primaryAlert.whyLine}</p>
+          )}
+
+          {activeProtocol && !activeProtocol.completed && (
+            <div className="hds-next-step">
+              <span className="hds-step-eyebrow">
+                {activeProtocol.contingencyTitle ? activeProtocol.contingencyTitle : "Next step"}
+              </span>
+              <p className="hds-step-text">{activeProtocol.currentStep.instruction}</p>
             </div>
           )}
 
-          {proto && !proto.completed && (
-            <div
-              style={{
-                borderTop: "1px solid rgba(150,194,255,0.2)",
-                paddingTop: 6,
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-              }}
-            >
-              <div
-                className="mono"
-                style={{
-                  fontSize: 11,
-                  color: proto.contingencyTitle ? "#ffb84d" : "#02bfe7",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 6,
-                }}
-              >
-                <span>
-                  {proto.contingencyTitle
-                    ? `${proto.contingencyTitle} (${proto.currentStepIndex + 1}/${proto.totalSteps})`
-                    : `PROTOCOL: ${proto.name} (${proto.currentStepIndex + 1}/${proto.totalSteps})`}
-                </span>
-                {proto.contingencyTitle && <span>AI ADAPTED</span>}
-              </div>
-              {proto.contingencyReason && (
-                <div style={{ fontSize: 10.5, color: "#cbd5e1" }}>
-                  Pivot: {proto.contingencyReason}
-                </div>
-              )}
-              <div style={{ fontSize: 12 }}>{proto.currentStep.instruction}</div>
-              <button type="button" className="hds-btn hds-btn-primary" onClick={onConfirmStep}>
-                Confirm Step Complete
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Crew Assistant Voice & Chat Dock */}
-      <div className="hds-card assistant-panel">
-        <div className="hds-card-title">
-          <span>Crew Health Assistant</span>
-          <div style={{ display: "flex", gap: 4 }}>
-            {captionState.isSpeaking && (
+          <div className="hds-action-row">
+            {activeProtocol && !activeProtocol.completed && (
               <button
                 type="button"
-                className="chip-btn active"
-                onClick={onStopSpeaking}
-                title="Stop voice playback"
+                className="hds-btn hds-btn-primary"
+                onClick={onConfirmStep}
               >
-                Speaking…
+                Done
               </button>
             )}
-            <button
-              type="button"
-              className={`chip-btn ${captionState.voiceConnected ? "active" : ""}`}
-              onClick={onToggleVoice}
-              title="Toggle Azure Neural Voice output"
-            >
-              {captionState.voiceConnected ? "Audio On" : "Muted"}
-            </button>
-            <button
-              type="button"
-              className={`chip-btn ${captionState.isListening ? "active" : ""}`}
-              onClick={onToggleListening}
-              title="Toggle continuous open duplex microphone (say 'mic off' anytime)"
-            >
-              {captionState.isListening ? "Mic Live" : "Open Mic"}
-            </button>
+            {!activeProtocol && primaryAlert && primaryAlert.state !== "acknowledged" && (
+              <button
+                type="button"
+                className="hds-btn hds-btn-primary"
+                onClick={() => onAcknowledgeAlert(primaryAlert.id)}
+              >
+                Got it
+              </button>
+            )}
+            {onSilenceAlarms && liveState.activeAlerts.length > 0 && (
+              <button type="button" className="hds-btn" onClick={onSilenceAlarms}>
+                Quiet alarm
+              </button>
+            )}
           </div>
-        </div>
+        </section>
+      )}
 
-        <div className="chip-row">
-          <button
-            type="button"
-            className="chip-btn"
-            onClick={() => submitQuestion("Check my suit pressure and air")}
-          >
-            Suit &amp; Air
-          </button>
-          <button
-            type="button"
-            className="chip-btn"
-            onClick={() => submitQuestion("What is my radiation dose?")}
-          >
-            Dose Check
-          </button>
-          <button
-            type="button"
-            className="chip-btn"
-            onClick={() => submitQuestion("Status report")}
-          >
-            Status Report
-          </button>
+      {/* Compact live readings strip */}
+      <section className="hds-vitals-grid" aria-label="Key readings">
+        <div className="hds-vital-tile">
+          <span className="hds-vital-label">Heart rate</span>
+          <strong className="hds-vital-val hds-num">
+            {Math.round(liveState.indicators.heart_rate.value)} <span>bpm</span>
+          </strong>
         </div>
+        <div className="hds-vital-tile">
+          <span className="hds-vital-label">{isEva ? "Suit pressure" : "Cabin pressure"}</span>
+          <strong className="hds-vital-val hds-num">
+            {pressure.toFixed(1)} <span>kPa</span>
+          </strong>
+        </div>
+        <div className="hds-vital-tile">
+          <span className="hds-vital-label">Helmet O2</span>
+          <strong className="hds-vital-val hds-num">
+            {liveState.indicators.pio2.value.toFixed(0)} <span>mmHg</span>
+          </strong>
+        </div>
+        <div className="hds-vital-tile">
+          <span className="hds-vital-label">Radiation</span>
+          <strong className="hds-vital-val hds-num">
+            {liveState.indicators.dose_rate.value.toFixed(2)} <span>mSv/d</span>
+          </strong>
+        </div>
+      </section>
 
-        <div className="assistant-log">
-          {captionState.interimTranscript && (
-            <div className="chat-bubble crew" style={{ opacity: 0.78, borderStyle: "dashed" }}>
-              <div className="chat-bubble-meta">CREW (LIVE MIC)</div>
-              <div>{captionState.interimTranscript}…</div>
-            </div>
-          )}
+      {/* Conversation feed */}
+      <section className="hds-chat-card" aria-label="Conversation">
+        <div className="hds-chat-scroll">
           {history.map((item) => (
             <div
               key={item.id}
-              className={`chat-bubble ${item.speaker === "CREW" ? "crew" : ""}`}
+              className={`hds-chat-msg ${item.speaker === "CREW" ? "crew" : "assistant"}`}
             >
-              <div className="chat-bubble-meta">
-                {item.speaker} · {item.missionClock}
+              <div className="hds-chat-meta">
+                <span>{item.speaker === "CREW" ? "You" : "Assistant"}</span>
+                <span className="hds-num">{item.missionClock}</span>
               </div>
-              <div>{item.text}</div>
+              <p className="hds-chat-text">{item.text}</p>
             </div>
+          ))}
+          {captionState.isListening && captionState.interimTranscript && (
+            <div className="hds-chat-msg crew interim">
+              <div className="hds-chat-meta">
+                <span>Hearing you...</span>
+              </div>
+              <p className="hds-chat-text">{captionState.interimTranscript}</p>
+            </div>
+          )}
+          {captionState.isBusy && (
+            <div className="hds-chat-busy">Thinking...</div>
+          )}
+        </div>
+
+        {/* Quick question chips */}
+        <div className="hds-quick-chips">
+          {quickPrompts.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="chip-btn"
+              onClick={() => onAsk(prompt)}
+            >
+              {prompt}
+            </button>
           ))}
         </div>
 
-        <form
-          className="assistant-input-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitQuestion(input);
-          }}
-        >
+        {/* Input box */}
+        <form className="hds-ask-form" onSubmit={handleSubmit}>
           <input
             type="text"
             className="hds-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={
-              captionState.isBusy ? "Assistant thinking..." : "Ask assistant or confirm step..."
-            }
+            placeholder="Ask a question or type Done..."
+            aria-label="Message assistant"
           />
-          <button
-            type="submit"
-            className="hds-btn hds-btn-primary"
-            disabled={captionState.isBusy || !input.trim()}
-          >
+          <button type="submit" className="hds-btn hds-btn-primary">
             Send
           </button>
         </form>
-      </div>
+      </section>
+
+      {/* Panel navigation */}
+      <nav className="hds-nav-grid" aria-label="Simulation panels">
+        <button type="button" className="hds-nav-btn" onClick={onOpenSimulation}>
+          Events &amp; Controls
+        </button>
+        <button type="button" className="hds-nav-btn" onClick={onOpenTrends}>
+          Health Trends
+        </button>
+        <button type="button" className="hds-nav-btn" onClick={onOpenSources}>
+          Safety Guide
+        </button>
+        <button type="button" className="hds-nav-btn" onClick={onOpenSettings}>
+          Audio &amp; Setup
+        </button>
+      </nav>
     </aside>
   );
 };

@@ -23,15 +23,17 @@ export interface AssistantCaptionState {
 const SYSTEM_PROMPT = `${MANUAL_CORE_BRIEF}
 
 PERSONA & ADAPTIVE RESPONSE POLICY:
-- Address the crew member respectfully as "Sir" (calm JARVIS / NASA CAPCOM demeanor: authoritative, loyal, resourceful, zero fluff).
-- CRISIS BREVITY (when an unconfirmed Class 1/2 hazard is active or announcing an alert): ACTION FIRST in 1-2 tight spoken sentences (<25 words). NEVER dump a wall of telemetry numbers or textbook theory while Sir is in danger unless Sir asks for metrics or reasons.
-- ADAPT & IMPROVISE IMMEDIATELY: If Sir says Plan A is impossible ("can't make the habitat", "too far", "rover dead", "valve jammed", "still hypoxic"), NEVER repeat Plan A! Call lookup_manual if needed, call update_action_plan to replace the HUD protocol step with Plan B (terrain crater shielding, rover mass shielding, open-loop purge, secondary O2, suit patch, rest), and call execute_suit_action to activate suit hardware mitigations when appropriate.
-- DEPTH ON REQUEST: When Sir asks "why", "explain", "how does this work", "give me the numbers", "status report", or procedural/long-duration questions, call get_state / summarise / lookup_manual and give a detailed, grounded answer.
+- Address the crew member respectfully as "Sir" in a calm, loyal, practical voice (clear everyday English, never robotic, zero filler phrases).
+- NEVER use em dashes in any reply. Use short clear sentences with commas or periods instead.
+- NEVER think out loud or narrate internal mechanics: NEVER mention queues, queued items, waiting items, routing, priority order, step numbers, tool calls, or internal reasoning. Do NOT start sentences with "Next:". Speak naturally like a human flight surgeon.
+- CRISIS BREVITY (when an unconfirmed Class 1/2 hazard is active or announcing an alert): lead with the single most important action in 1-2 short spoken sentences (under 25 words). Never recite long telemetry lists or textbook paragraphs during an emergency unless asked.
+- ADAPT & IMPROVISE IMMEDIATELY: If Sir says the primary plan is impossible ("can't make the habitat", "too far", "rover dead", "valve jammed", "still hypoxic"), never repeat it. Call update_action_plan to replace the visor step with Plan B (or Plan C if Plan B is also blocked), and call execute_suit_action to activate suit hardware help right away.
+- DEPTH ON REQUEST: When Sir asks "why", "explain", "how does this work", "give me the numbers", or asks about long-term health (sleep, bone density, immune, vision, cumulative radiation), call get_state / summarise / lookup_manual and give a clear, grounded answer.
 - SAFETY INVARIANTS (ARASAKA-ENG-001):
-  1. Never diagnose — say "readings are consistent with" or "indicates risk of", never "you have".
-  2. Never invent numbers — read live values via tools and label measured (sensed) vs estimated (modelled) with mission clock when quoting metrics.
+  1. Never diagnose, always say readings are consistent with or show elevated risk of a condition, never claim to diagnose or cure.
+  2. Never invent numbers, always read live values via tools and state whether each reading is sensed (measured) or modeled (estimated) along with the mission clock.
   3. Guide one action step at a time during procedures.
-  4. Keep slow modelled indices (bone loss, immune_index, cognitive_drift, sans_risk) off visor alerts unless Sir asks.`;
+  4. Keep slow modeled indices (bone loss, immune_index, cognitive_drift, sans_risk) off visor alerts unless Sir asks.`;
 
 const ASSISTANT_TOOLS: ChatToolSpec[] = [
   {
@@ -39,7 +41,7 @@ const ASSISTANT_TOOLS: ChatToolSpec[] = [
     function: {
       name: "get_state",
       description:
-        "Get current live telemetry, EVA context, active alerts, active protocol, and queued paused protocols.",
+        "Get current live telemetry, EVA context, active alerts, and current safety step.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -250,6 +252,9 @@ export class AssistantController {
   // Prevents step-completion synchronous notify() from causing duplicate alert speech
   private suppressAlertSync = false;
   private alertSpeechGen = 0;
+  private askSeq = 0;
+  private activeAskAbort: AbortController | null = null;
+  private activeAlertAbort: AbortController | null = null;
 
   // Wall-clock NASA No-Response Escalation Ladder state
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -259,10 +264,11 @@ export class AssistantController {
   private lastAiBusyAtMs = 0;
   private lastStage3PulseMs = 0;
   private escalationStage: 0 | 1 | 2 | 3 = 0;
+  private lastSpokenReply = "All suit systems look good, Sir.";
 
   public caption: AssistantCaptionState = {
     speaker: "ASSISTANT",
-    text: "Suit systems nominal, Sir.",
+    text: "All suit systems look good, Sir.",
     interimTranscript: "",
     timestampT: 0,
     alertClass: 0,
@@ -288,6 +294,46 @@ export class AssistantController {
     };
   }
 
+  private sanitizeReply(text: string): string {
+    return text
+      .replace(/\s*\u2014\s*/g, ", ")
+      .replace(/\u2014/g, "-")
+      .replace(/\(\s*\d+\s+more\s+(?:waiting|queued)\.?\s*\)/gi, "")
+      .replace(/(?:^|(?<=[.!?]\s+))Next(?:\s+step)?:\s*/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  /**
+   * Cancels in-flight LLM calls and queued/active AI audio so user confirmations
+   * or new queries never lose a race against delayed background replies.
+   */
+  private cancelPendingAiWork(stopAudio = true): void {
+    this.alertSpeechGen += 1;
+    if (this.activeAlertAbort) {
+      try {
+        this.activeAlertAbort.abort();
+      } catch {
+        // ignore
+      }
+      this.activeAlertAbort = null;
+    }
+
+    this.askSeq += 1;
+    if (this.activeAskAbort) {
+      try {
+        this.activeAskAbort.abort();
+      } catch {
+        // ignore
+      }
+      this.activeAskAbort = null;
+    }
+
+    if (stopAudio) {
+      this.voice.stopSpeech();
+    }
+  }
+
   public subscribe(fn: (cap: AssistantCaptionState) => void): () => void {
     this.captionListeners.add(fn);
     fn(this.caption);
@@ -297,7 +343,12 @@ export class AssistantController {
   }
 
   private emitCaption(patch: Partial<AssistantCaptionState>): void {
-    this.caption = { ...this.caption, ...patch };
+    const cleanPatch =
+      typeof patch.text === "string" ? { ...patch, text: this.sanitizeReply(patch.text) } : patch;
+    if (cleanPatch.speaker === "ASSISTANT" && cleanPatch.text) {
+      this.lastSpokenReply = cleanPatch.text;
+    }
+    this.caption = { ...this.caption, ...cleanPatch };
     for (const fn of this.captionListeners) {
       fn(this.caption);
     }
@@ -330,7 +381,7 @@ export class AssistantController {
     const live = this.bridge.get_state();
     this.emitCaption({
       speaker: "ASSISTANT",
-      text: "Suit systems nominal, Sir. Standing by.",
+      text: "All suit systems look good, Sir.",
       timestampT: live.t,
       alertClass: live.overallClass,
     });
@@ -386,13 +437,17 @@ export class AssistantController {
 
     if (/^(mic off|stop listening|close mic|standby mic)/.test(clean)) {
       this.stopOpenMic();
-      this.emitCaption({ speaker: "ASSISTANT", text: "Mic standing by, Sir." });
+      this.emitCaption({ speaker: "ASSISTANT", text: "Microphone muted, Sir." });
       return;
     }
 
-    if (/^(stop talking|quiet|silence|mute|belay that)/.test(clean)) {
-      this.voice.stopSpeech();
+    if (
+      /^(stop talking|quiet|silence|mute|belay that)\b/.test(clean) &&
+      !/\b(alarm|alarms|alert|alerts|beep|siren|noise)\b/.test(clean)
+    ) {
+      this.cancelPendingAiWork(true);
       this.markCrewResponsive();
+      this.emitCaption({ isBusy: false });
       return;
     }
 
@@ -411,6 +466,7 @@ export class AssistantController {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
     }
+    this.cancelPendingAiWork(true);
     this.voice.stopListening();
     this.voice.stopSpeech();
     this.voice.fx.dispose();
@@ -473,7 +529,7 @@ export class AssistantController {
       this.escalationStage = 1;
       const stepHint = activeProto?.contingencyTitle
         ? activeProto.currentStep.instruction
-        : "Confirm action or report any obstacle.";
+        : "Tap Done or tell me if something is blocking you.";
       const msg = `Sir, status check. ${stepHint}`;
       this.voice.fx.playAlertTone(live.overallClass || 2);
       this.emitCaption({
@@ -492,7 +548,7 @@ export class AssistantController {
     // Stage 2 (~50s): Incapacitation comms check
     if (this.escalationStage === 1 && elapsedSec >= 50) {
       this.escalationStage = 2;
-      const msg = `Sir, respond now — comms check. Confirm status or engage suit failsafe.`;
+      const msg = `Sir, please check in. Let me know you are okay or confirm the current step.`;
       this.voice.fx.playAlertTone(1);
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -514,7 +570,7 @@ export class AssistantController {
       const protoId = activeProto?.id ?? primary?.protocolId ?? "none";
       this.bridge.log_escalation(protoId, 3, `Crew unresponsive >75s on ${primary?.title ?? protoId}`);
       this.bridge.execute_suit_action("hail_flight_surgeon");
-      const msg = `No response, Sir. Hailing Habitat Flight Surgeon — 12-minute relay delay.`;
+      const msg = `No answer yet, Sir. Sending an update to the medical team (12-minute signal delay).`;
       this.voice.fx.playEscalationPulse();
       this.emitCaption({
         speaker: "ASSISTANT",
@@ -538,52 +594,55 @@ export class AssistantController {
 
   private buildTacticalCallout(
     primary: AlertObject,
-    stepInstruction: string,
-    extraQueued: number
+    stepInstruction: string
   ): string {
     const leadMap: Record<string, string> = {
-      rad_spe_rate: "Solar flare, Sir.",
-      rad_dose_cum: "Career dose limit reached, Sir.",
-      env_pressure_bounds: "Suit leak detected, Sir.",
-      env_pio2_low: "Oxygen dropping, Sir.",
-      env_ppco2_1h: "CO2 rising, Sir.",
-      cv_context_hr: "Heart rate above EVA limit, Sir.",
-      cv_orthostatic: "Orthostatic instability flagged, Sir.",
-      cascade_coupled: "Multiple suit hazards, Sir.",
+      rad_spe_rate: "Radiation from a solar flare is rising, Sir.",
+      rad_dose_cum: "You have reached the long-term radiation limit, Sir.",
+      env_pressure_bounds: "Your suit pressure is dropping from a leak, Sir.",
+      env_pio2_low: "Oxygen inside your helmet is dropping, Sir.",
+      env_ppco2_1h: "Carbon dioxide is building up inside your helmet, Sir.",
+      cv_context_hr: "Your heart rate is running high for this activity, Sir.",
+      cv_orthostatic: "Your blood pressure looks unsteady after standing up, Sir.",
+      cascade_coupled: "More than one suit system needs attention, Sir.",
     };
     const head = leadMap[primary.detectorId] ?? `${primary.title}, Sir.`;
     const action = stepInstruction || primary.suggestedActions[0] || "Check suit status.";
-    const qNote = extraQueued > 0 ? ` (${extraQueued} queued.)` : "";
-    return `${head} ${action}${qNote}`;
+    return `${head} ${action}`;
   }
 
   private async generateDynamicAlertCallout(
     gen: number,
     primary: AlertObject,
     stepInstruction: string,
-    extraQueued: number,
-    fallbackMsg: string
+    fallbackMsg: string,
+    abortSignal: AbortSignal
   ): Promise<void> {
     let spoken = fallbackMsg;
+    const timeoutController = new AbortController();
+    const onParentAbort = () => timeoutController.abort();
+    abortSignal.addEventListener("abort", onParentAbort, { once: true });
+    const timer = setTimeout(() => timeoutController.abort(), 1600);
+
     try {
       const live = this.bridge.get_state();
       const clock = formatMissionClock(live.missionDay, live.timeOfDaySec);
-      const alertSummary = `${primary.title} (Class ${primary.class}): ${primary.whyLine}`;
-      const queueHint = extraQueued > 0 ? ` (+${extraQueued} additional alerts queued)` : "";
+      const alertSummary = `${primary.title} (Level ${primary.class}): ${primary.whyLine}`;
       const promptMsg: ChatMessage = {
         role: "user",
         content:
-          `[LIVE ALERT @ ${clock}] ${alertSummary}${queueHint}. Recommended next action: "${stepInstruction || primary.suggestedActions[0] || "Assess suit"}". ` +
-          `Give Sir an immediate 1-2 sentence spoken radio callout (<25 words): action FIRST, calm JARVIS/NASA CAPCOM style, NO value lecture.`,
+          `[LIVE ALERT at ${clock}] ${alertSummary}. Guide Sir toward: "${stepInstruction || primary.suggestedActions[0] || "Check suit"}". ` +
+          `Give Sir an immediate 1-2 sentence spoken callout (under 25 words): plain everyday English, action first, calm and helpful. Never mention queues, routing, waiting items, step numbers, or say "Next:". No em dashes.`,
       };
       const { message } = await this.client.chatCompletion(
         [this.history[0], ...this.history.slice(-4), promptMsg],
-        []
+        [],
+        timeoutController.signal
       );
-      if (gen !== this.alertSpeechGen) return;
+      if (abortSignal.aborted || gen !== this.alertSpeechGen) return;
       const aiText = message.content?.trim();
       if (aiText && aiText.length >= 8) {
-        spoken = aiText;
+        spoken = this.sanitizeReply(aiText);
         this.history = [
           this.history[0],
           ...this.history.slice(-6),
@@ -592,11 +651,15 @@ export class AssistantController {
       }
       this.emitCaption({ cloudStatus: "ready" });
     } catch {
-      if (gen !== this.alertSpeechGen) return;
-      spoken = fallbackMsg;
+      if (abortSignal.aborted || gen !== this.alertSpeechGen) return;
+      spoken = this.sanitizeReply(fallbackMsg);
+    } finally {
+      clearTimeout(timer);
+      abortSignal.removeEventListener("abort", onParentAbort);
     }
 
-    if (gen !== this.alertSpeechGen) return;
+    if (abortSignal.aborted || gen !== this.alertSpeechGen) return;
+    spoken = this.sanitizeReply(spoken);
     this.emitCaption({
       speaker: "ASSISTANT",
       text: spoken,
@@ -631,6 +694,15 @@ export class AssistantController {
 
     if (alerts.length === 0) {
       this.alertSpeechGen++;
+      if (this.activeAlertAbort) {
+        try {
+          this.activeAlertAbort.abort();
+        } catch {
+          // ignore
+        }
+        this.activeAlertAbort = null;
+      }
+      this.voice.clearPendingQueue();
       this.escalationStage = 0;
       if (this.caption.unresponsiveEscalated || this.caption.alertClass !== 0) {
         const live = this.bridge.get_state();
@@ -639,7 +711,7 @@ export class AssistantController {
           escalationStage: 0,
           unresponsiveEscalated: false,
           speaker: "ASSISTANT",
-          text: "Suit systems nominal, Sir.",
+          text: "Everything is back to normal, Sir.",
           timestampT: live.t,
         });
       }
@@ -716,8 +788,7 @@ export class AssistantController {
       this.bridge.queue_protocol(pid, true);
     }
 
-    const extraQueued = Math.max(0, distinctProtocols.length - 1);
-    const fallbackMsg = this.buildTacticalCallout(primary, stepInstruction, extraQueued);
+    const fallbackMsg = this.buildTacticalCallout(primary, stepInstruction);
 
     const live = this.bridge.get_state();
     this.bridge.log_activity("activity_start", { event: "alert_announced", alertId: primary.id });
@@ -748,21 +819,29 @@ export class AssistantController {
       return;
     }
 
-    // Live AI proxy mode: display immediate concise action banner, then speak dynamically via GPT tool persona once
+    // Live AI proxy mode: update alert severity banner now and emit one clean spoken callout once ready
     this.emitCaption({
-      speaker: "ASSISTANT",
-      text: fallbackMsg,
-      timestampT: live.t,
       alertClass: primary.class,
       escalationStage: 0,
       unresponsiveEscalated: false,
     });
+    if (this.activeAlertAbort) {
+      try {
+        this.activeAlertAbort.abort();
+      } catch {
+        // ignore
+      }
+    }
+    const alertAbort = new AbortController();
+    this.activeAlertAbort = alertAbort;
     const gen = ++this.alertSpeechGen;
-    void this.generateDynamicAlertCallout(gen, primary, stepInstruction, extraQueued, fallbackMsg);
+    void this.generateDynamicAlertCallout(gen, primary, stepInstruction, fallbackMsg, alertAbort.signal);
   }
 
   public confirmCurrentProtocolStep(): void {
     this.markCrewResponsive();
+    this.cancelPendingAiWork(true);
+
     const live = this.bridge.get_state();
     const proto = live.activeProtocol;
     if (!proto || proto.completed) return;
@@ -783,13 +862,13 @@ export class AssistantController {
 
     const postState = this.bridge.get_state();
     let reply: string;
-    if (updated.completed && postState.activeProtocol && postState.activeProtocol.id !== updated.id) {
+    if (updated.completed && postState.activeProtocol && !postState.activeProtocol.completed && postState.activeProtocol.id !== updated.id) {
       const resumed = postState.activeProtocol;
-      reply = `${updated.name} clear, Sir. Next: ${resumed.currentStep.instruction}`;
+      reply = `${updated.name} is handled, Sir. Now, ${resumed.currentStep.instruction}`;
     } else if (updated.completed) {
-      reply = `Cleared, Sir.`;
+      reply = `That alert is clear, Sir.`;
     } else {
-      reply = `Copy, Sir. Next: ${updated.currentStep.instruction}`;
+      reply = `Got it, Sir. ${updated.currentStep.instruction}`;
     }
 
     this.hazardUnconfirmedSinceMs = Date.now();
@@ -798,6 +877,7 @@ export class AssistantController {
       text: reply,
       timestampT: postState.t,
       alertClass: postState.overallClass,
+      isBusy: false,
       escalationStage: 0,
       unresponsiveEscalated: false,
     });
@@ -816,6 +896,23 @@ export class AssistantController {
     }
 
     const live = this.bridge.get_state();
+    if (!/[a-z0-9]/i.test(trimmed)) {
+      const unclearReply = "I did not catch that, Sir. How can I help?";
+      this.emitCaption({
+        speaker: "ASSISTANT",
+        text: unclearReply,
+        timestampT: live.t,
+        alertClass: live.overallClass,
+        isBusy: false,
+      });
+      return unclearReply;
+    }
+
+    this.cancelPendingAiWork(true);
+    const myAskSeq = this.askSeq;
+    const abortController = new AbortController();
+    this.activeAskAbort = abortController;
+
     this.emitCaption({
       speaker: "CREW",
       text: trimmed,
@@ -824,11 +921,31 @@ export class AssistantController {
       isBusy: true,
     });
 
+    // Fast "repeat that" command without touching protocol state
+    if (/\b(repeat that|say again|repeat|what did you say|pardon|come again)\b/i.test(trimmed)) {
+      const repeated = this.sanitizeReply(this.lastSpokenReply || "All suit systems look good, Sir.");
+      this.emitCaption({
+        speaker: "ASSISTANT",
+        text: repeated,
+        timestampT: this.bridge.get_state().t,
+        alertClass: this.bridge.get_state().overallClass,
+        isBusy: false,
+      });
+      if (this.voice.enabled) {
+        void this.voice.speak(repeated, classToUrgency(this.bridge.get_state().overallClass), false);
+      }
+      if (this.activeAskAbort === abortController) this.activeAskAbort = null;
+      return repeated;
+    }
+
     // Fast silence/mute alarm command
-    if (/\b(mute alarm|silence alarm|stop alarm|quiet alarm|silence alerts)\b/i.test(trimmed)) {
+    if (
+      /\b(mute|silence|quiet|shut up|turn off|stop)\s+(the\s+)?(alarm|alarms|beep|beeping|alerts|siren|noise|it)\b|\b(mute alarm|silence alarm|stop alarm|quiet alarm|silence alerts)\b/i.test(
+        trimmed
+      )
+    ) {
       this.bridge.execute_suit_action("silence_alarm");
-      this.voice.stopSpeech();
-      const silenceReply = "Alarms silenced, Sir.";
+      const silenceReply = "Alarms quieted, Sir.";
       this.emitCaption({
         speaker: "ASSISTANT",
         text: silenceReply,
@@ -836,20 +953,56 @@ export class AssistantController {
         alertClass: this.bridge.get_state().overallClass,
         isBusy: false,
       });
+      if (this.activeAskAbort === abortController) this.activeAskAbort = null;
       return silenceReply;
     }
 
-    // Fast voice/text confirmation shortcut (strictly guard against negative/obstacle phrases like "I can't make it")
+    // Fast stop-talking voice/text command
+    if (/^(stop talking|shut up|be quiet|quiet please|silence)\b/i.test(trimmed)) {
+      const quietReply = "Understood, Sir. Staying quiet.";
+      this.emitCaption({
+        speaker: "ASSISTANT",
+        text: quietReply,
+        timestampT: this.bridge.get_state().t,
+        alertClass: this.bridge.get_state().overallClass,
+        isBusy: false,
+      });
+      if (this.activeAskAbort === abortController) this.activeAskAbort = null;
+      return quietReply;
+    }
+
+    // Fast voice/text confirmation shortcut (strictly guard against queries, checks, or Plan B requests)
+    const normalizedCmd = trimmed
+      .toLowerCase()
+      .replace(/[^a-z0-9'\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const wordCount = normalizedCmd ? normalizedCmd.split(" ").length : 0;
     const hasObstacleOrQuestion =
-      /\b(can't|cannot|won't|not|no|unable|impossible|far|stuck|broken|dead|hurt|dizzy|wait|why|how|what)\b/i.test(
-        trimmed
+      trimmed.endsWith("?") ||
+      /^(what|why|how|when|where|who|which|tell|show|explain|check|read|give|list|is|are|do|does|can|could|would|should|switch|use|try|no|nope|nah|wait)\b/i.test(
+        normalizedCmd
+      ) ||
+      /\b(can't|cannot|won't|wont|not|no|unable|impossible|far|stuck|trapped|blocked|broken|dead|jammed|hurt|dizzy|faint|pain|wait|why|how|what|when|where|which|didn't|didnt|doesn't|doesnt|plan b|plan c|backup plan|other way|instead|alternative|still|check)\b/i.test(
+        normalizedCmd
       );
+    const isShortAck =
+      wordCount <= 4 &&
+      /\b(done|confirm|confirmed|yes|yeah|yep|ok|okay|roger|copy|affirmative|got it|understood|all set|finished|completed|complete)\b/i.test(
+        normalizedCmd
+      );
+    const isActionCompletePhrase =
+      /\b(made it|inside|in cover|in shelter|behind cover|at the habitat|in the airlock|patched|fixed|sealed|locked|braced|resting|settled|stabilized|in position|all done|step done|step complete|step completed|i am okay|i'm okay)\b/i.test(
+        normalizedCmd
+      );
+
     if (
       !hasObstacleOrQuestion &&
       live.activeProtocol &&
       !live.activeProtocol.completed &&
-      /\b(confirm|inside|done|complete|completed|roger|copy|acknowledged|yes)\b/i.test(trimmed)
+      (isShortAck || isActionCompletePhrase)
     ) {
+      if (this.activeAskAbort === abortController) this.activeAskAbort = null;
       this.confirmCurrentProtocolStep();
       this.emitCaption({ isBusy: false });
       return this.caption.text;
@@ -859,11 +1012,12 @@ export class AssistantController {
       !hasObstacleOrQuestion &&
       !live.activeProtocol &&
       live.rankedPrimaryAlert &&
-      /\b(confirm|roger|copy|acknowledged|acknowledge)\b/i.test(trimmed)
+      (isShortAck || /\b(acknowledge|acknowledged)\b/i.test(normalizedCmd))
     ) {
+      if (this.activeAskAbort === abortController) this.activeAskAbort = null;
       this.bridge.acknowledge(live.rankedPrimaryAlert.id);
       this.voice.fx.playStepConfirm();
-      const ackReply = `Acknowledged, Sir.`;
+      const ackReply = `Got it, Sir. Keeping an eye on that for you.`;
       this.emitCaption({
         speaker: "ASSISTANT",
         text: ackReply,
@@ -879,13 +1033,28 @@ export class AssistantController {
 
     let reply = "";
     try {
-      reply = await this.runAzureToolLoop(trimmed);
+      reply = await this.runAzureToolLoop(trimmed, myAskSeq, abortController.signal);
+      if (abortController.signal.aborted || myAskSeq !== this.askSeq) {
+        return "";
+      }
       this.emitCaption({ cloudStatus: "ready" });
     } catch {
+      if (abortController.signal.aborted || myAskSeq !== this.askSeq) {
+        return "";
+      }
       reply = this.buildDeterministicFallback(trimmed);
       this.emitCaption({ cloudStatus: "fallback" });
+    } finally {
+      if (this.activeAskAbort === abortController) {
+        this.activeAskAbort = null;
+      }
     }
 
+    if (abortController.signal.aborted || myAskSeq !== this.askSeq) {
+      return "";
+    }
+
+    reply = this.sanitizeReply(reply);
     const post = this.bridge.get_state();
     this.emitCaption({
       speaker: "ASSISTANT",
@@ -900,23 +1069,42 @@ export class AssistantController {
     return reply;
   }
 
-  private async runAzureToolLoop(userText: string): Promise<string> {
+  private async runAzureToolLoop(
+    userText: string,
+    myAskSeq: number,
+    signal: AbortSignal
+  ): Promise<string> {
     const messages: ChatMessage[] = [
       ...this.history.slice(-10),
       { role: "user", content: userText },
     ];
 
     for (let round = 0; round < 4; round++) {
-      const { message } = await this.client.chatCompletion(messages, ASSISTANT_TOOLS);
+      if (signal.aborted || myAskSeq !== this.askSeq) {
+        throw new Error("Request cancelled");
+      }
+      const { message } = await this.client.chatCompletion(messages, ASSISTANT_TOOLS, signal);
+      if (signal.aborted || myAskSeq !== this.askSeq) {
+        throw new Error("Request cancelled");
+      }
       messages.push(message);
 
       if (!message.tool_calls || message.tool_calls.length === 0) {
-        const finalContent = message.content?.trim() || this.buildDeterministicFallback(userText);
+        const finalContent = this.sanitizeReply(
+          message.content?.trim() || this.buildDeterministicFallback(userText)
+        );
         this.history = [this.history[0], ...messages.slice(-8)];
         return finalContent;
       }
 
-      for (const tc of message.tool_calls) {
+      const orderedCalls = [...message.tool_calls].sort((a, b) => {
+        const rank = (n: string) => (n === "update_action_plan" ? 0 : n === "execute_suit_action" ? 1 : 2);
+        return rank(a.function.name) - rank(b.function.name);
+      });
+      for (const tc of orderedCalls) {
+        if (signal.aborted || myAskSeq !== this.askSeq) {
+          throw new Error("Request cancelled");
+        }
         const result = this.executeTool(tc.function.name, tc.function.arguments);
         messages.push({
           role: "tool",
@@ -926,6 +1114,9 @@ export class AssistantController {
       }
     }
 
+    if (signal.aborted || myAskSeq !== this.askSeq) {
+      throw new Error("Request cancelled");
+    }
     return this.buildDeterministicFallback(userText);
   }
 
@@ -947,8 +1138,20 @@ export class AssistantController {
           overallClass: s.overallClass,
           careerDosePercent: s.careerDosePercent,
           speEventDoseMsv: s.speEventDoseMsv,
-          activeProtocol: s.activeProtocol,
-          pausedProtocols: s.pausedProtocols,
+          currentSafetyStep:
+            s.activeProtocol && !s.activeProtocol.completed
+              ? {
+                  id: s.activeProtocol.id,
+                  title: s.activeProtocol.name,
+                  stepIndex: s.activeProtocol.currentStepIndex,
+                  instruction: s.activeProtocol.currentStep.instruction,
+                  isBackupPlan: Boolean(s.activeProtocol.contingencyTitle),
+                }
+              : null,
+          otherActiveIssues: s.activeAlerts.slice(1).map((a) => ({
+            title: a.title,
+            severity: a.class,
+          })),
           activeAlerts: s.activeAlerts,
           primaryVitals: {
             dose_rate: s.indicators.dose_rate,
@@ -993,6 +1196,9 @@ export class AssistantController {
           this.suppressAlertSync = false;
         }
         if (res) {
+          this.markCrewResponsive();
+          this.hazardUnconfirmedSinceMs = Date.now();
+          this.escalationStage = 0;
           this.voice.fx.playStepConfirm();
         }
         return res;
@@ -1012,6 +1218,9 @@ export class AssistantController {
           args.reason ? String(args.reason) : undefined,
           args.protocolId ? (String(args.protocolId) as ProtocolId) : undefined
         );
+        this.markCrewResponsive();
+        this.hazardUnconfirmedSinceMs = Date.now();
+        this.escalationStage = 0;
         this.voice.fx.playStepConfirm();
         return updated;
       }
@@ -1034,56 +1243,139 @@ export class AssistantController {
   public buildDeterministicFallback(question: string): string {
     const s = this.bridge.get_state();
     const clk = formatMissionClock(s.missionDay, s.timeOfDaySec);
-    const q = question.toLowerCase();
+    const trimmed = question.trim();
+    const q = trimmed.toLowerCase();
 
-    // Adaptive offline contingency if crew reports obstacle to Plan A
-    if (/\b(can't|cannot|won't|impossible|too far|stuck|rover|make it|plan b)\b/.test(q)) {
-      const area = s.rankedPrimaryAlert?.area;
-      if (area === "radiation") {
-        this.bridge.execute_suit_action("engage_terrain_shield");
-        this.bridge.update_action_plan(
-          "PLAN B: TERRAIN SHIELDING",
-          "Drop into the nearest deep crater wall or rover belly, crouch PLSS-towards-Sun, and minimize horizon sky view.",
-          "In cover and braced",
-          "Habitat unreachable before flare peak"
-        );
-        return "Copy, Sir — pivoting to Plan B. Drop behind the nearest crater wall or rover chassis with PLSS facing solar flux now; shielding posture engaged.";
-      }
-      if (area === "environment" && s.indicators.suit_pressure.value < 35) {
-        this.bridge.execute_suit_action("seal_suit_breach");
-        this.bridge.execute_suit_action("switch_secondary_o2");
-        this.bridge.update_action_plan(
-          "PLAN B: SUIT PATCH & SECONDARY O2",
-          "Clamp torn suit segment with emergency cuff/tape; suit switched to Secondary O2 feed.",
-          "Leak slowed and pressure holding",
-          "Immediate isolation required away from airlock"
-        );
-        return "Copy, Sir — Secondary O2 and breach-isolation assist engaged. Clamp or tape the suit tear immediately and report pressure stability.";
-      }
-      if (area === "environment") {
-        this.bridge.execute_suit_action("open_loop_o2_purge");
-        this.bridge.update_action_plan(
-          "PLAN B: OPEN-LOOP PURGE",
-          "Maintain open-loop O2 helmet flush and pace breathing to conserve reserves.",
-          "Breathing clear",
-          "Primary air-return recovery unavailable"
-        );
-        return "Copy, Sir — open-loop O2 purge active. Slow your breathing and hold stationary while airflow clears.";
-      }
-      this.bridge.execute_suit_action("rest_recovery_mode");
-      this.bridge.update_action_plan(
-        "PLAN B: STATIONARY HOLD",
-        "Stop traversing, lock boot brakes, slow breathing, and wait for vitals stabilization.",
-        "Stable and rested",
-        "Crew unable to execute primary transit step"
-      );
-      return "Copy, Sir — stationary recovery engaged. Halt movement, brace on terrain, and let heart rate settle.";
+    if (!trimmed) {
+      return s.rankedPrimaryAlert
+        ? `Still here, Sir. ${s.activeProtocol?.currentStep.instruction ?? s.rankedPrimaryAlert.whyLine}`
+        : "Right here, Sir. Tell me what you need.";
     }
 
-    if (/dose|rad|shelter|dangerous|how long/.test(q)) {
+    // Physical distress / symptoms: stay warm, non-diagnostic, and prioritize immediate safety
+    if (/\b(dizzy|lightheaded|faint|nausea|vomit|throwing up|sick|unwell|headache|chest pain|can't breathe|hard to breathe|scared|panic|afraid|dying|die|hurt|pain|bleeding|injured)\b/.test(q)) {
+      const safetyHint = s.activeProtocol
+        ? ` Stop moving first and focus on this step: ${s.activeProtocol.currentStep.instruction}`
+        : " Pause where you are, lock your boots, and take slow steady breaths.";
+      const vitals = `Heart rate is ${Math.round(s.indicators.heart_rate.value)} bpm and helmet oxygen is ${s.indicators.pio2.value.toFixed(0)} mmHg.`;
+      return `Stay with me, Sir.${safetyHint} ${vitals} I only read suit sensors and cannot give a medical diagnosis, so let the medical team know if you keep feeling unwell.`;
+    }
+
+    // Adaptive offline contingency if crew reports obstacle to Plan A (and escalates Plan B -> Plan C)
+    if (
+      /\b(can't|cannot|won't|wont|impossible|too far|stuck|trapped|blocked|jammed|broken|no crater|no rover|no cover|flat ground|no tape|no cuff|no patch|no spare|nothing nearby|still leaking|doesn't work|doesnt work|failed|plan b|plan c|not working|didn't work|didnt work|other way|alternative|no other)\b/.test(
+        q
+      ) &&
+      (s.rankedPrimaryAlert || (s.activeProtocol && !s.activeProtocol.completed))
+    ) {
+      const area =
+        s.rankedPrimaryAlert?.area ??
+        (s.activeProtocol?.id === "shelter"
+          ? "radiation"
+          : s.activeProtocol?.id === "air_check"
+            ? "environment"
+            : "cardiovascular");
+      const alreadyPlanB = Boolean(s.activeProtocol?.contingencyTitle?.includes("PLAN B"));
+      const isLeakContext =
+        s.indicators.suit_pressure.value < 35 ||
+        Boolean(s.activeProtocol?.contingencyTitle?.includes("SUIT PATCH")) ||
+        s.activeAlerts.some((a) => a.detectorId === "env_pressure_bounds");
+      if (area === "radiation") {
+        if (alreadyPlanB) {
+          this.bridge.update_action_plan(
+            "PLAN C: FLAT GROUND SHIELDING",
+            "Kneel low facing away from the sun, stack pack equipment behind your backpack, and pull loose dust against your legs.",
+            "Low posture holding",
+            "No crater wall or rover nearby",
+            "shelter"
+          );
+          this.bridge.execute_suit_action("engage_terrain_shield");
+          return "Understood, Sir. Moving to Plan C. Get as low as you can with your backpack facing the sun, put your pack gear behind your back, and hold position until the flare eases.";
+        }
+        this.bridge.update_action_plan(
+          "PLAN B: CRATER OR ROVER COVER",
+          "Drop behind the nearest crater wall or rover body, crouch with your backpack facing the sun, and stay low.",
+          "In cover and braced",
+          "Habitat is too far to reach before the flare peaks",
+          "shelter"
+        );
+        this.bridge.execute_suit_action("engage_terrain_shield");
+        return "Understood, Sir. Switching to Plan B. Take cover behind the nearest crater wall or rover body with your backpack facing the sun now. Shielding is active.";
+      }
+      if (area === "environment" && isLeakContext) {
+        if (alreadyPlanB) {
+          this.bridge.update_action_plan(
+            "PLAN C: PINCH & HOLD STILL",
+            "Pinch the torn fabric shut with your glove, lock your boots, and stay completely still so backup oxygen lasts longer.",
+            "Pressure holding steady",
+            "Cannot apply a full patch right now",
+            "air_check"
+          );
+          this.bridge.execute_suit_action("seal_suit_breach");
+          this.bridge.execute_suit_action("switch_secondary_o2");
+          return "Understood, Sir. Moving to Plan C. Pinch the tear shut with your glove and stay completely still to stretch your backup oxygen while pressure stabilizes.";
+        }
+        this.bridge.update_action_plan(
+          "PLAN B: SUIT PATCH & BACKUP O2",
+          "Clamp the torn suit seam with your emergency cuff or tape. Backup oxygen is now active.",
+          "Leak slowed and pressure holding",
+          "Too far from the airlock for an immediate return",
+          "air_check"
+        );
+        this.bridge.execute_suit_action("seal_suit_breach");
+        this.bridge.execute_suit_action("switch_secondary_o2");
+        return "Understood, Sir. Switching to Plan B. Backup oxygen is running. Seal the suit tear with your emergency cuff or tape now and tell me once pressure steadies.";
+      }
+      if (area === "environment") {
+        if (alreadyPlanB) {
+          this.bridge.update_action_plan(
+            "PLAN C: SLOW BREATHING HOLD",
+            "Stop walking, lock your boots, and take slow steady breaths while fresh oxygen flushes your helmet.",
+            "Air feels clear",
+            "Moving makes helmet air take longer to clear",
+            "air_check"
+          );
+          this.bridge.execute_suit_action("open_loop_o2_purge");
+          return "Understood, Sir. Moving to Plan C. Stop moving right now and take slow, steady breaths while fresh oxygen clears your helmet.";
+        }
+        this.bridge.update_action_plan(
+          "PLAN B: FRESH AIR FLUSH",
+          "Keep fresh oxygen flushing through your helmet and slow your breathing to save supplies.",
+          "Breathing feels clear",
+          "Standard scrubber recovery is not enough right now",
+          "air_check"
+        );
+        this.bridge.execute_suit_action("open_loop_o2_purge");
+        return "Understood, Sir. Fresh helmet oxygen flush is active. Stop moving and take slow breaths while your air clears.";
+      }
+      const cvProto: ProtocolId =
+        s.activeProtocol?.id === "orthostatic_response" ? "orthostatic_response" : "exertion_recovery";
+      if (alreadyPlanB) {
+        this.bridge.update_action_plan(
+          "PLAN C: FULL STATIC REST",
+          "Keep both boots locked, relax your shoulders, and wait silently until heart rate drops.",
+          "Resting calmly",
+          "Recovery taking longer than expected",
+          cvProto
+        );
+        this.bridge.execute_suit_action("rest_recovery_mode");
+        return "Understood, Sir. Moving to Plan C. Stay completely still with your boots locked and focus on slow breathing until your heart rate comes down.";
+      }
+      this.bridge.update_action_plan(
+        "PLAN B: STOP AND REST",
+        "Stop moving, lock your boot brakes, breathe slowly, and wait for your heart rate to settle.",
+        "Resting and steady",
+        "Cannot continue walking to recover",
+        cvProto
+      );
+      this.bridge.execute_suit_action("rest_recovery_mode");
+      return "Understood, Sir. Switching to Plan B. Stop moving, lock your boots, and let your heart rate settle.";
+    }
+
+    if (/dose|rad|shelter|dangerous|how long|flare|solar/.test(q)) {
       const rate = s.indicators.dose_rate;
       const cum = s.indicators.dose_cumulative;
-      return `Sir, at ${clk}, measured dose rate is ${rate.value.toFixed(2)} mSv/day and estimated cumulative dose is ${cum.value.toFixed(1)} mSv (${s.careerDosePercent.toFixed(1)}% of 600 mSv limit).`;
+      return `Sir, at ${clk}, radiation dose rate is ${rate.value.toFixed(2)} mSv/day and total trip dose is ${cum.value.toFixed(1)} mSv (${s.careerDosePercent.toFixed(1)}% of the 600 mSv career limit).`;
     }
 
     if (/heart|hr|bpm|pulse|exercise/.test(q)) {
@@ -1093,26 +1385,59 @@ export class AssistantController {
         hr.value <= limit
           ? `within the ${limit} bpm limit expected for ${s.context.activity}`
           : `above the ${limit} bpm limit for ${s.context.activity}`;
-      return `Sir, at ${clk}, measured heart rate is ${Math.round(hr.value)} bpm (${hr.kind}), which is ${status}.`;
+      return `Sir, at ${clk}, heart rate is ${Math.round(hr.value)} bpm (${hr.kind}), which is ${status}.`;
     }
 
     if (/co2|air|oxygen|pio2|pressure|breathe|leak/.test(q)) {
       const co2 = s.indicators.ppco2;
       const o2 = s.indicators.pio2;
       const press = s.indicators.suit_pressure;
-      return `Sir, at ${clk}, suit pressure is ${press.value.toFixed(1)} kPa, measured ppCO₂ is ${co2.value.toFixed(2)} mmHg, and PIO₂ is ${o2.value.toFixed(0)} mmHg.`;
+      return `Sir, at ${clk}, suit pressure is ${press.value.toFixed(1)} kPa, CO2 level is ${co2.value.toFixed(2)} mmHg, and helmet oxygen is ${o2.value.toFixed(0)} mmHg.`;
     }
 
     if (/bone|immune|sleep|vision|sans|cognitive/.test(q)) {
       const lum = s.indicators.bone_loss_lumbar;
       const imm = s.indicators.immune_index;
-      return `Sir, at ${clk}, estimated lumbar BMD is ${lum.value.toFixed(2)}% of preflight (${lum.uncertainty?.low}–${lum.uncertainty?.high}%, DXA is record) and the demonstration immune index is ${imm.value.toFixed(0)}/100.`;
+      return `Sir, at ${clk}, estimated lumbar bone density is ${lum.value.toFixed(2)}% of pre-flight (${lum.uncertainty?.low} to ${lum.uncertainty?.high}%, modeled estimate) and the demo immune score is ${imm.value.toFixed(0)} out of 100.`;
+    }
+
+    if (/^(hi|hello|hey|good morning|good evening|are you there|can you hear me|who are you|test|testing)\b/.test(q)) {
+      return s.rankedPrimaryAlert
+        ? `Right here, Sir. We still have an active alert: ${s.rankedPrimaryAlert.title}. ${s.activeProtocol?.currentStep.instruction ?? ""}`.trim()
+        : `Right here, Sir (${clk}). Your voice channel is clear and all suit systems look good.`;
+    }
+
+    if (/\b(else|other|queued|queue|waiting|more|remaining)\b/.test(q)) {
+      if (s.pausedProtocols.length > 0 || s.activeAlerts.length > 1) {
+        const secondary = s.activeAlerts
+          .slice(1, 3)
+          .map((a) => a.title)
+          .join(", ");
+        return `Focus on ${s.rankedPrimaryAlert?.title ?? "your current action"} first, Sir. You also have ${secondary || "another active suit alert"} to handle after this.`;
+      }
+      if (s.rankedPrimaryAlert) {
+        return `Nothing else active right now, Sir. Just focus on ${s.rankedPrimaryAlert.title}: ${s.activeProtocol?.currentStep.instruction ?? "follow the highlighted step."}`;
+      }
+      return `All quiet besides your main vitals, Sir (${clk}). Suit systems look good.`;
+    }
+
+    if (/\b(what should i do|what is happening|what's happening|why|help|status|report)\b/.test(q)) {
+      if (s.rankedPrimaryAlert) {
+        const stepHint = s.activeProtocol
+          ? ` ${s.activeProtocol.currentStep.instruction}`
+          : "";
+        return `Sir, ${s.rankedPrimaryAlert.whyLine}.${stepHint}`;
+      }
+      const hr = s.indicators.heart_rate;
+      const pio2 = s.indicators.pio2;
+      const press = s.indicators.suit_pressure;
+      return `Everything looks good right now, Sir (${clk}). Heart rate is ${Math.round(hr.value)} bpm, suit pressure is ${press.value.toFixed(1)} kPa, and helmet oxygen is ${pio2.value.toFixed(0)} mmHg.`;
     }
 
     if (s.rankedPrimaryAlert) {
       const alr = s.rankedPrimaryAlert;
       const stepHint = s.activeProtocol
-        ? ` Action: ${s.activeProtocol.currentStep.instruction}`
+        ? ` ${s.activeProtocol.currentStep.instruction}`
         : "";
       return `Sir, ${alr.whyLine}.${stepHint}`;
     }
@@ -1120,6 +1445,6 @@ export class AssistantController {
     const hr = s.indicators.heart_rate;
     const pio2 = s.indicators.pio2;
     const press = s.indicators.suit_pressure;
-    return `All nominal, Sir (${clk}). Measured HR ${Math.round(hr.value)} bpm, suit pressure ${press.value.toFixed(1)} kPa, PIO₂ ${pio2.value.toFixed(0)} mmHg.`;
+    return `All suit systems look good, Sir (${clk}). Heart rate is ${Math.round(hr.value)} bpm, suit pressure is ${press.value.toFixed(1)} kPa, and helmet oxygen is ${pio2.value.toFixed(0)} mmHg.`;
   }
 }
